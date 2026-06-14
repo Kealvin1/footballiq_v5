@@ -1,0 +1,10 @@
+{
+  "name": "footballiq-v5",
+  "version": "5.0.0",
+  "description": "FootballIQ v5 — AI football predictions with real xG, referee and odds data",
+  "engines": { "node": ">=18.0.0" },
+  "dependencies": {
+    "@netlify/blobs": "^8.0.0"
+  },
+  "private": true
+}

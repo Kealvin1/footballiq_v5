@@ -16,6 +16,29 @@
 
 /* ── TOKENS ─────────────────────────────────────────────────── */
 :root{
+  /* ── LIGHT MODE (default) — warm luxury cream ── */
+  --bg:#f5f3ee;--bg2:#edeae3;--card:#ffffff;--card2:#f9f7f2;--card3:#f2efe8;
+  --border:rgba(0,0,0,0.08);--border2:rgba(0,0,0,0.14);
+  --gold:#b8922a;--gold-l:#d4a840;--gold-d:#8a6c1e;
+  --gold-glow:rgba(184,146,42,0.1);--gold-border:rgba(184,146,42,0.3);
+  --gold-border2:rgba(184,146,42,0.55);
+  --em:#00a878;--em-g:rgba(0,168,120,0.1);--em-b:rgba(0,168,120,0.25);
+  --sap:#2b7de0;--sap-g:rgba(43,125,224,0.1);
+  --ruby:#d93050;--ruby-g:rgba(217,48,80,0.09);
+  --amr:#d4880a;--amr-g:rgba(212,136,10,0.1);--amr-b:rgba(212,136,10,0.25);
+  --gray:#707088;
+  --text:#16162a;--t2:#5c5c78;--t3:#9898b8;
+  --r:16px;--rs:10px;
+  --shadow:0 4px 24px rgba(0,0,0,0.12);
+  --shadow-gold:0 4px 20px rgba(184,146,42,0.2);
+  --shadow-card:0 2px 12px rgba(0,0,0,0.07);
+}
+
+/* ── DARK MODE — near-black luxury ── */
+body.dark{
+  background-image:
+    radial-gradient(ellipse 90% 60% at 50% -10%,rgba(201,168,76,0.05) 0%,transparent 65%),
+    radial-gradient(ellipse 50% 40% at 100% 80%,rgba(77,159,255,0.03) 0%,transparent 60%);
   --bg:#07070f;--bg2:#0c0c18;--card:#0f0f1c;--card2:#141426;--card3:#191930;
   --border:rgba(255,255,255,0.055);--border2:rgba(255,255,255,0.09);
   --gold:#c9a84c;--gold-l:#e8c56a;--gold-d:#9a7d35;
@@ -27,7 +50,6 @@
   --amr:#ffb830;--amr-g:rgba(255,184,48,0.1);--amr-b:rgba(255,184,48,0.22);
   --gray:#606080;
   --text:#eeeef8;--t2:#8888aa;--t3:#44445e;
-  --r:16px;--rs:10px;
   --shadow:0 8px 40px rgba(0,0,0,0.6);
   --shadow-gold:0 4px 24px rgba(201,168,76,0.18);
   --shadow-card:0 2px 20px rgba(0,0,0,0.5);
@@ -38,17 +60,18 @@ body{
   background:var(--bg);color:var(--text);min-height:100vh;
   padding-bottom:5rem;
   background-image:
-    radial-gradient(ellipse 90% 60% at 50% -10%,rgba(201,168,76,0.05) 0%,transparent 65%),
-    radial-gradient(ellipse 50% 40% at 100% 80%,rgba(77,159,255,0.03) 0%,transparent 60%);
+    radial-gradient(ellipse 90% 60% at 50% -10%,rgba(184,146,42,0.04) 0%,transparent 65%),
+    radial-gradient(ellipse 50% 40% at 100% 80%,rgba(43,125,224,0.02) 0%,transparent 60%);
 }
 
 /* ── HEADER ─────────────────────────────────────────────────── */
 .hdr{
   position:sticky;top:0;z-index:100;
-  background:rgba(7,7,15,0.92);
+  background:rgba(245,243,238,0.92);
   border-bottom:1px solid var(--border);
   backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
 }
+body.dark .hdr{background:rgba(7,7,15,0.92);border-bottom:1px solid rgba(201,168,76,0.1)}
 .hdr-inner{
   max-width:780px;margin:0 auto;padding:0 20px;
   height:62px;display:flex;align-items:center;gap:14px;
@@ -664,7 +687,7 @@ select option{background:var(--card2)}
 <body>
 
 <!-- HEADER -->
-<div class="hdr" style="border-bottom:1px solid rgba(201,168,76,0.12)">
+<div class="hdr">
   <div class="hdr-inner">
     <div class="logo">
       <div class="logo-icon"><i class="ti ti-ball-football"></i></div>
@@ -748,7 +771,7 @@ select option{background:var(--card2)}
       </div>
       <div class="teams-row">
         <div class="team-col"><div class="avatar" id="av1"></div><div class="team-name" id="r-t1"></div><div class="team-xg" id="r-xg1"></div></div>
-        <div class="vs-col"><div class="vs-lbl">vs</div><span class="risk-badge" id="r-risk"></span></div>
+        <div class="vs-col"><div class="vs-lbl">vs</div><span class="risk-badge" id="r-risk"></span><div style="margin-top:6px"><span id="lineup-status-badge"></span></div></div>
         <div class="team-col"><div class="avatar" id="av2"></div><div class="team-name" id="r-t2"></div><div class="team-xg" id="r-xg2"></div></div>
       </div>
       <p class="prob-lbl">WIN PROBABILITY</p>
@@ -1214,6 +1237,25 @@ function refreshAnalysis(){
   setTimeout(()=>doAnalyze(true),100);
 }
 
+
+// ── DETECT LINEUP STATUS from Phase 1 intel text ────────────────────
+function detectLineupStatus(intelText){
+  const t=(intelText||"").toLowerCase();
+  // Phase 1 is instructed to write "LINEUPS: [CONFIRMED ✓ / PREDICTED ~]"
+  if(t.includes("confirmed ✓")||t.includes("lineups: confirmed")||
+     t.includes("confirmed lineups")||t.includes("official starting")||
+     t.includes("confirmed xi")||t.includes("confirmed starting xi")||
+     t.includes("official xi")||t.includes("confirmed \u2713"))
+    return"confirmed";
+  if(t.includes("predicted ~")||t.includes("lineups: predicted")||
+     t.includes("predicted lineup")||t.includes("predicted xi")||
+     t.includes("predicted \u223c"))
+    return"predicted";
+  // Fallback: if we see 22 real player names it's likely confirmed
+  const namePattern=(intelText.match(/[A-Z][a-zé-]+ [A-Z][a-zé-]+/g)||[]).length;
+  return namePattern>15?"confirmed":"predicted";
+}
+
 let _curCacheKey=""; // track so Refresh button can clear it
 async function doAnalyze(forceRefresh=false){
   const t1=$("t1").value.trim(),t2=$("t2").value.trim(),comp=$("comp").value;
@@ -1274,6 +1316,10 @@ async function doAnalyze(forceRefresh=false){
 
     clearInterval(stepTmr);renderSteps(STEPS_P1.length,1);
 
+    // Detect lineup status and store for display
+    const lineupStatus=detectLineupStatus(intel);
+    console.log("Lineup status detected:", lineupStatus);
+
     // Extract referee name from Phase 1 output for lookup
     const refName = extractRefereeName(intel);
     const refStats = refName ? await fetchRefereeStats(refName, comp) : null;
@@ -1320,6 +1366,7 @@ async function doAnalyze(forceRefresh=false){
     }
     p._liveOdds = liveOdds?matchToTeam(liveOdds,t1,t2):null;
     p._movement = lineMovement;
+    p._lineupStatus = lineupStatus;
     curPred = p;
 
     _curCacheKey=cacheKey;
@@ -1653,6 +1700,7 @@ After reasoning, output ONLY a valid JSON object (NO markdown, NO code fences (n
   ],
   "riskLevel":"Medium",
   "analystNote":"2-3 sentence expert summary of this prediction backed by the intelligence gathered.",
+  "lineupStatus":"CONFIRMED",
   "dataQuality":"High",
   "disclaimer":"For informational purposes only. Please gamble responsibly. 18+ only."
 }`;
@@ -1675,6 +1723,18 @@ function renderResults(p,fromCache){
   const rc=RISK_C[p.riskLevel]||AMBER;
   $("r-risk").textContent=`${p.riskLevel||"Medium"} risk`;
   $("r-risk").style.cssText=`background:${rc}18;color:${rc}`;
+  // Show lineup status badge
+  const _ls=p._lineupStatus||"unknown";
+  const _lsEl=document.getElementById("lineup-status-badge");
+  if(_lsEl){
+    if(_ls==="confirmed"){
+      _lsEl.innerHTML='<i class="ti ti-check"></i> Lineups Confirmed';
+      _lsEl.style.cssText="background:rgba(0,200,150,0.12);color:#00c896;border:1px solid rgba(0,200,150,0.3);font-size:10px;font-weight:800;padding:3px 10px;border-radius:6px;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px";
+    }else if(_ls==="predicted"){
+      _lsEl.innerHTML='<i class="ti ti-dots"></i> Lineups Predicted';
+      _lsEl.style.cssText="background:rgba(255,184,48,0.1);color:#ffb830;border:1px solid rgba(255,184,48,0.3);font-size:10px;font-weight:800;padding:3px 10px;border-radius:6px;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px";
+    }else{_lsEl.style.display="none";}
+  }
 
   const wp=p.winProbabilities||{team1:45,draw:25,team2:30};
   // Normalise so bars always sum to 100%
@@ -1822,7 +1882,7 @@ function buildIntelTab(p,c1,c2){
 
   // Lineups
   if(intel.team1Lineup?.length||intel.team2Lineup?.length){
-    h+=`<div class="card"><div class="sec-ttl"><i class="ti ti-users"></i> Lineups</div>
+    h+=`<div class="card"><div class="sec-ttl"><i class="ti ti-users"></i> Lineups${p._lineupStatus==="confirmed"?` <span style="font-size:9px;font-weight:800;background:rgba(0,200,150,0.12);color:#00c896;border:1px solid rgba(0,200,150,0.3);padding:2px 8px;border-radius:5px;margin-left:6px;letter-spacing:.06em">✓ CONFIRMED</span>`:p._lineupStatus==="predicted"?` <span style="font-size:9px;font-weight:800;background:rgba(255,184,48,0.1);color:#ffb830;border:1px solid rgba(255,184,48,0.3);padding:2px 8px;border-radius:5px;margin-left:6px;letter-spacing:.06em">~ PREDICTED</span>`:""}</div>
       <div class="two-col">
         <div><div class="lineup-team" style="color:${c1}">${p.team1} (${intel.team1Formation||""})</div>${(intel.team1Lineup||[]).map(pl=>`<div class="lineup-player"><span class="pos-tag" style="background:${c1}18;color:${c1}">${pl.split(":")[0]||""}</span>${pl.split(":")[1]?.trim()||pl}</div>`).join("")}</div>
         <div><div class="lineup-team" style="color:${c2}">${p.team2} (${intel.team2Formation||""})</div>${(intel.team2Lineup||[]).map(pl=>`<div class="lineup-player"><span class="pos-tag" style="background:${c2}18;color:${c2}">${pl.split(":")[0]||""}</span>${pl.split(":")[1]?.trim()||pl}</div>`).join("")}</div>

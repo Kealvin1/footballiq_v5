@@ -1030,10 +1030,10 @@ let toastTmr;
 function toast(msg,ms=2400){const t=$("toast");t.textContent=msg;t.classList.remove("hidden");clearTimeout(toastTmr);toastTmr=setTimeout(()=>t.classList.add("hidden"),ms)}
 
 // ── API ──
-async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt=""){
+async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="claude-sonnet-4-6"){
   const key=getApiKey();
   if(!key){toast("⚠ Add API key in Settings ⚙");throw new Error("No API key configured.")}
-  const body={model:"claude-sonnet-4-6",max_tokens:tokens,messages:[{role:"user",content:prompt}]};
+  const body={model,max_tokens:tokens,messages:[{role:"user",content:prompt}]};
   if(useSearch)body.tools=[{type:"web_search_20250305",name:"web_search"}];
   if(systemPrompt)body.system=systemPrompt;
   const res=await fetch("https://api.anthropic.com/v1/messages",{
@@ -1195,7 +1195,14 @@ async function doAnalyze(){
     startStepTimer(1);
 
     const intelPrompt = buildIntelPrompt(t1,t2,comp,mode,xg1,xg2,lineMovement);
-    const intel = await callAI(intelPrompt, 4000, true);
+    let intel;
+    try{
+      intel = await callAI(intelPrompt, 4000, true, "", "claude-haiku-4-5-20251001");
+    }catch(e){
+      if(e.message==="__TRUNCATED__"){
+        intel = await callAI(intelPrompt, 3000, true, "", "claude-haiku-4-5-20251001");
+      } else { throw e; }
+    }
 
     clearInterval(stepTmr);renderSteps(STEPS_P1.length,1);
 
@@ -1450,7 +1457,7 @@ STEP 6 — REFEREE INFLUENCE: How does this referee's style affect cards, penalt
 STEP 7 — CORNERS ANALYSIS: Pressing intensity, set piece specialists, defensive shape → corner volume expected?
 STEP 8 — MARKET VALUE: For each key market, compute: implied_probability = 1/odds. Compare to your estimated true_probability. Only mark value=true when edge = (true_prob - implied_prob) / implied_prob > 0.05 (5%+ edge). Show the calculation. This prevents false value flags.
 
-After reasoning, output ONLY a valid JSON object (no markdown, no code fences. Use precise confidence values like 63, 71, 58 — never round to multiples of 5 or 10):
+After reasoning, output ONLY a valid JSON object (no markdown, no code fences. Use precise confidence values like 63, 71, 58 — never round to multiples of 5 or 10. Keep "reasoning" fields under 12 words, "chainOfThought" under 80 words):
 {
   "team1":"${t1}","team2":"${t2}","competition":"${comp}","venue":"stadium or TBD",
   "winProbabilities":{"team1":52,"draw":24,"team2":24},
@@ -1500,13 +1507,12 @@ After reasoning, output ONLY a valid JSON object (no markdown, no code fences. U
     "oddsMovement":"Market opened ${t1} at 2.40, now 2.10 — significant smart money on home win"
   },
   "correctScorePredictions":[
-    {"score":"1-0","probability":18,"odds":5.5},{"score":"2-1","probability":13,"odds":8.0},
-    {"score":"1-1","probability":12,"odds":6.5},{"score":"2-0","probability":11,"odds":7.0},
-    {"score":"0-0","probability":9,"odds":8.1}
+    {"score":"1-0","probability":18,"odds":5.5},
+    {"score":"1-1","probability":12,"odds":6.5},
+    {"score":"2-0","probability":11,"odds":7.0}
   ],
   "goalscorers":[
     {"player":"Real player name","team":"${t1}","odds":2.5,"probability":42,"role":"Striker"},
-    {"player":"Real player name","team":"${t1}","odds":3.2,"probability":31,"role":"Winger"},
     {"player":"Real player name","team":"${t2}","odds":3.5,"probability":29,"role":"Striker"},
     {"player":"Real player name","team":"${t2}","odds":4.0,"probability":25,"role":"Midfielder"}
   ],

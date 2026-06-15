@@ -963,6 +963,12 @@ function fmtDate(iso){return new Date(iso).toLocaleDateString("en-GB",{day:"nume
 function getLS(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}}
 function setLS(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){if(e.name==="QuotaExceededError")toast("⚠ Storage full — older cached predictions cleared",3500);}}
 function getSettings(){return getLS(LS.SET,{})}
+function validateApiKey(k){
+  if(!k||!k.trim())return"API key is empty.";
+  if(!k.startsWith("sk-ant-"))return"Key must start with sk-ant-";
+  if(k.length<30)return"Key is too short.";
+  return null;
+}
 function getApiKey(){if(HARDCODED_KEY!=="YOUR_API_KEY_HERE")return HARDCODED_KEY;return getSettings().apiKey||""}
 // Odds API key is server-side only (Netlify env var)
 function getCurrency(){return getSettings().currency||"€"}
@@ -1020,7 +1026,10 @@ function openSettings(){
 }
 function closeSettings(){hide("settings-overlay")}
 function saveSettings(){
-  setLS(LS.SET,{apiKey:$("key-input").value.trim(),currency:$("cur-input").value});
+  const key=$("key-input").value.trim();
+  const err=validateApiKey(key);
+  if(err&&key){toast("⚠ "+err);return}
+  setLS(LS.SET,{apiKey:key,currency:$("cur-input").value});
   closeSettings();toast("Settings saved ✓");
   $("cur-sym").textContent=getCurrency();
 }
@@ -1036,11 +1045,32 @@ async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="c
   const body={model,max_tokens:tokens,messages:[{role:"user",content:prompt}]};
   if(useSearch)body.tools=[{type:"web_search_20250305",name:"web_search"}];
   if(systemPrompt)body.system=systemPrompt;
-  const res=await fetch("https://api.anthropic.com/v1/messages",{
-    method:"POST",
-    headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-    body:JSON.stringify(body)
-  });
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),120000); // 2 min timeout
+  let res;
+  try{
+    res=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify(body),
+      signal:controller.signal
+    });
+  }catch(fe){
+    clearTimeout(timeout);
+    if(fe.name==="AbortError")throw new Error("Request timed out (2 min). Please try again.");
+    throw new Error("Network error: "+fe.message);
+  }finally{clearTimeout(timeout)}
+  // Handle HTTP errors (401 wrong key, 429 rate limit, 529 overloaded, etc.)
+  if(!res.ok){
+    let errBody={};try{errBody=await res.json()}catch{}
+    const errType=errBody?.error?.type||"";
+    const errMsg=errBody?.error?.message||"";
+    if(res.status===401)throw new Error("Invalid API key. Please check your key in ⚙ Settings.");
+    if(res.status===429||errType==="rate_limit_error")throw new Error("Rate limit reached. Please wait 30 seconds and try again.");
+    if(res.status===529||errType==="overloaded_error")throw new Error("Anthropic servers are busy. Please try again in a moment.");
+    if(res.status===400)throw new Error("Bad request: "+errMsg.slice(0,80));
+    throw new Error(`API error ${res.status}: ${errMsg.slice(0,80)||res.statusText}`);
+  }
   const d=await res.json();
   if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));
   // Detect token truncation — incomplete JSON would fail to parse
@@ -1049,22 +1079,51 @@ async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="c
 }
 
 function parseJSON(raw){
-  const start=raw.indexOf("{");
-  if(start===-1)throw new Error("No JSON in AI response. Please try again.");
-  let depth=0,inStr=false,esc=false;
-  for(let i=start;i<raw.length;i++){
-    const ch=raw[i];
+  // Step 1: Strip markdown code fences Claude sometimes wraps JSON in
+  let text=raw
+    .replace(/^```json\s*/im,"").replace(/^```\s*/im,"")
+    .replace(/\s*```\s*$/m,"").trim();
+
+  // Step 2: Find start of JSON object
+  const start=text.indexOf("{");
+  if(start===-1)throw new Error("No JSON found in response. Please try again.");
+
+  // Step 3: Brace-counter to find end of JSON object
+  let depth=0,inStr=false,esc=false,end=-1;
+  for(let i=start;i<text.length;i++){
+    const ch=text[i];
     if(esc){esc=false;continue}
-    if(ch==="\\" && inStr){esc=true;continue}
+    if(ch==="\\"&&inStr){esc=true;continue}
     if(ch==="\""){inStr=!inStr;continue}
     if(inStr)continue;
     if(ch==="{")depth++;
-    else if(ch==="}"){depth--;if(depth===0){
-      try{return JSON.parse(raw.slice(start,i+1))}
-      catch(e){throw new Error("AI returned malformed JSON. Please try again.")}
-    }}
+    else if(ch==="}"){depth--;if(depth===0){end=i;break}}
   }
-  throw new Error("Could not parse AI response. Please try again.");
+  if(end===-1)throw new Error("Response was cut off. Please try again.");
+
+  let jsonStr=text.slice(start,end+1);
+
+  // Step 4: Fix common Claude JSON mistakes
+  jsonStr=jsonStr
+    .replace(/,([\s\n\r]*[}\]])/g,"$1")  // trailing commas
+    .replace(/\/\/[^\n]*/g,"")             // JS-style comments
+    .replace(/([{,]\s*)([\w]+)\s*:/g,      // unquoted keys → quoted
+      (_,p,k)=>`${p}"${k}":`)
+    .replace(/:\s*undefined/g,":null")        // undefined → null
+    .replace(/:\s*NaN/g,":null");             // NaN → null
+
+  // Step 5: Parse — try direct first, then repair, then strict
+  try{ return JSON.parse(jsonStr); }catch(_){
+    try{
+      // Escape unescaped control characters inside strings
+      const repaired=jsonStr.replace(/"(?:[^"\\]|\\.)*"/g,m=>
+        m.replace(/[\x00-\x1f]/g,ch=>"\\u"+ch.charCodeAt(0).toString(16).padStart(4,"0"))
+      );
+      return JSON.parse(repaired);
+    }catch(_){
+      throw new Error("__MALFORMED__");
+    }
+  }
 }
 
 // ── LIVE ODDS (The Odds API) ──
@@ -1173,7 +1232,8 @@ async function doAnalyze(){
     setPhase(0);renderSteps(0,0);
     advanceSteps(0);
 
-    const [xg1raw, xg2raw, oddsProxy] = await Promise.all([
+    // allSettled: one failed fetch won't kill the analysis
+    const [xg1res, xg2res, oddsRes] = await Promise.allSettled([
       fetchXGData(t1, comp),
       fetchXGData(t2, comp),
       fetchLiveOddsProxy(comp),
@@ -1181,8 +1241,9 @@ async function doAnalyze(){
 
     // Done with Phase 0
     renderSteps(STEPS_P0.length, 0);
-    const xg1 = xg1raw || null;
-    const xg2 = xg2raw || null;
+    const xg1 = xg1res.status==="fulfilled" ? xg1res.value : null;
+    const xg2 = xg2res.status==="fulfilled" ? xg2res.value : null;
+    const oddsProxy = oddsRes.status==="fulfilled" ? oddsRes.value : null;
     const liveOdds = oddsProxy?.games || null;
     const lineMovement = oddsProxy?.movement || null;
 
@@ -1235,7 +1296,21 @@ async function doAnalyze(){
     $("phase-fill").style.width="100%";
     $("phase-fill").style.background="var(--green)";
 
-    const p = parseJSON(rawAnalysis);
+    let p;
+    try{
+      p = parseJSON(rawAnalysis);
+    }catch(e){
+      if(e.message==="__MALFORMED__"){
+        // Ask Claude to fix its own malformed JSON
+        toast("Fixing response format...", 3000);
+        const repairPrompt=
+          `The JSON below has a syntax error. Return ONLY the corrected valid JSON with no other text:\n\n`+
+          rawAnalysis.slice(0,7000);
+        const fixedRaw=await callAI(repairPrompt,4000,false,"","claude-haiku-4-5-20251001");
+        p=parseJSON(fixedRaw);
+        if(!p)throw new Error("Could not repair JSON. Please try again.");
+      } else { throw e; }
+    }
     p._liveOdds = liveOdds?matchToTeam(liveOdds,t1,t2):null;
     p._movement = lineMovement;
     curPred = p;
@@ -1251,7 +1326,13 @@ async function doAnalyze(){
     clearInterval(stepTmr);
     hide("loading-section");show("form-section");
     const errMsg = e.message==="__TRUNCATED__"
-      ? "Response was too long even after retry. Try a simpler competition or check your Anthropic account limits."
+      ? "Response too long even after retry. Please try again."
+      : e.message==="__MALFORMED__"
+      ? "AI response format error. Please try again."
+      : (e.message||"").includes("timed out")
+      ? "Analysis timed out (>2 min). Check your internet and try again."
+      : (e.message||"").includes("Network error")
+      ? "Network error. Check your internet connection."
       : e.message==="No API key configured."
       ? "Add your Anthropic API key in ⚙ Settings first."
       : e.message||"Analysis failed. Please try again.";
@@ -1457,7 +1538,7 @@ STEP 6 — REFEREE INFLUENCE: How does this referee's style affect cards, penalt
 STEP 7 — CORNERS ANALYSIS: Pressing intensity, set piece specialists, defensive shape → corner volume expected?
 STEP 8 — MARKET VALUE: For each key market, compute: implied_probability = 1/odds. Compare to your estimated true_probability. Only mark value=true when edge = (true_prob - implied_prob) / implied_prob > 0.05 (5%+ edge). Show the calculation. This prevents false value flags.
 
-After reasoning, output ONLY a valid JSON object (no markdown, no code fences. Use precise confidence values like 63, 71, 58 — never round to multiples of 5 or 10. Keep "reasoning" fields under 12 words, "chainOfThought" under 80 words):
+After reasoning, output ONLY a valid JSON object (NO markdown, NO code fences (no backticks), NO comments, NO trailing commas. Start your response with { and end with }. Precise confidence values like 63, 71, 58 — never multiples of 5. Keep "reasoning" under 12 words, "chainOfThought" under 80 words):
 {
   "team1":"${t1}","team2":"${t2}","competition":"${comp}","venue":"stadium or TBD",
   "winProbabilities":{"team1":52,"draw":24,"team2":24},
@@ -1567,8 +1648,7 @@ function renderResults(p,fromCache){
   wp.team1=+wp1;wp.draw=+wpD;wp.team2=+wp2;
   html("prob-leg",`<span style="color:var(--gold);font-weight:700">${p.team1} ${wp.team1}%</span><span style="color:var(--t2);font-weight:600">Draw ${wp.draw}%</span><span style="color:var(--sap);font-weight:700">${p.team2} ${wp.team2}%</span>`);
 
-  if(p.mainPrediction){
-    const mp=p.mainPrediction;
+  {const mp=p.mainPrediction||{market:'1X2',pick:'—',odds:'—',confidence:0,value:false};
     html("top-pred",`<div><div class="tp-lbl">TOP PREDICTION</div><div class="tp-pick">${mp.market}: ${mp.pick}</div></div><div><div class="tp-odds">${mp.odds}</div><div class="tp-conf">${mp.confidence}% confidence${mp.value?`<span class="vtag">value</span>`:""}</div></div>`);
   }
   html("action-bar",`<button class="btn-sm" onclick="addToAcca()"><i class="ti ti-plus"></i> Add to Acca</button><button class="btn-ghost" onclick="sharePredict()" style="font-size:11px;padding:6px 13px"><i class="ti ti-share"></i> Share</button>`);
@@ -1586,10 +1666,10 @@ function buildAllTabs(p,c1,c2){
   // OVERVIEW
   let ov="";
   if(p.keyFactors?.length){
-    ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-list-check"></i> Key factors</div><div class="factors">${p.keyFactors.map((f,i)=>`<div class="factor"><span class="fnum">${i+1}</span><p>${f}</p></div>`).join("")}</div></div>`;
+    ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-list-check"></i> Key factors</div><div class="factors">${(p.keyFactors||[]).map((f,i)=>`<div class="factor"><span class="fnum">${i+1}</span><p>${f}</p></div>`).join("")}</div></div>`;
   }
   if(p.valueBets?.length){
-    ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-diamond"></i> Value bets</div>${p.valueBets.map(vb=>`
+    ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-diamond"></i> Value bets</div>${(p.valueBets||[]).map(vb=>`
       <div class="vbet"><div class="vbet-hdr"><div><div class="vbet-mkt">${vb.market}</div><div class="vbet-pick">${vb.pick}</div></div>
         <div class="odds-row"><div class="odds-col"><div class="lbl">Market</div><div class="val" style="color:${GREEN}">${vb.odds}</div></div>
         ${vb.trueOdds?`<div class="odds-col odds-div"><div class="lbl">Fair</div><div class="val">${vb.trueOdds}</div></div>`:""}
@@ -1599,7 +1679,7 @@ function buildAllTabs(p,c1,c2){
       </div>`).join("")}</div>`;
   }
   if(p.injuries?.length){
-    ov+=`<div><div class="sec-ttl"><i class="ti ti-first-aid-kit"></i> Injuries & doubts</div><div class="inj-grid">${p.injuries.map(inj=>`
+    ov+=`<div><div class="sec-ttl"><i class="ti ti-first-aid-kit"></i> Injuries & doubts</div><div class="inj-grid">${(p.injuries||[]).map(inj=>`
       <div class="inj-card"><div class="inj-row"><span class="inj-name">${inj.player}</span><span class="${inj.status==="Out"?"s-out":"s-doubt"}">${inj.status}</span></div><div class="inj-meta">${inj.team} · Impact: ${inj.impact}</div></div>`).join("")}</div></div>`;
   }
   html("tc-overview",ov||`<p style="color:var(--t2);font-size:13px">No additional details available.</p>`);
@@ -1608,7 +1688,7 @@ function buildAllTabs(p,c1,c2){
   buildIntelTab(p,c1,c2);
 
   // MARKETS
-  html("tc-markets",`<div class="mkt-grid">${(p.predictions||[]).map(m=>{
+  html("tc-markets",`<div class="mkt-grid">${(p.predictions||[]).filter(Boolean).map(m=>{
     const cc=cconf(m.confidence);
     return`<div class="mkt-card${m.value?" val":""}">
       ${m.value?`<span class="mkt-vtag">VALUE</span>`:""}
@@ -1626,7 +1706,7 @@ function buildAllTabs(p,c1,c2){
   buildOddsTab(p,c1,c2);
 
   // CORRECT SCORES
-  const sc=[...(p.correctScorePredictions||[])].sort((a,b)=>b.probability-a.probability);
+  const sc=[...(p.correctScorePredictions||[])].filter(s=>s&&s.score).sort((a,b)=>b.probability-a.probability);
   html("tc-scores",`<p style="font-size:13px;color:var(--t2);margin-bottom:14px">Top 5 most probable correct scores.</p><div class="scores-list">${sc.map((s,i)=>`
     <div class="score-row${i===0?" top":""}">
       <span class="s-rank">${i+1}</span><span class="s-val">${s.score}</span>
@@ -1635,7 +1715,7 @@ function buildAllTabs(p,c1,c2){
     </div>`).join("")}</div>`);
 
   // GOALSCORERS
-  const gs=[...(p.goalscorers||[])].sort((a,b)=>b.probability-a.probability);
+  const gs=[...(p.goalscorers||[])].filter(Boolean).sort((a,b)=>b.probability-a.probability);
   html("tc-players",`<p style="font-size:13px;color:var(--t2);margin-bottom:14px">Anytime goalscorer probabilities.</p><div class="sc-list">${gs.map(g=>{
     const gc=g.team===p.team1?c1:c2;
     return`<div class="sc-card">
@@ -1756,7 +1836,7 @@ function buildCCTab(p,c1,c2){
 
   // Corners
   if(p.cornerMarkets?.length){
-    h+=`<div class="cc-section"><div class="sec-ttl"><i class="ti ti-flag"></i> Corner Markets</div><div class="mkt-grid">${p.cornerMarkets.map(m=>{
+    h+=`<div class="cc-section"><div class="sec-ttl"><i class="ti ti-flag"></i> Corner Markets</div><div class="mkt-grid">${(p.cornerMarkets||[]).map(m=>{
       const cc=cconf(m.confidence);
       return`<div class="mkt-card${m.value?" val":""}">
         ${m.value?`<span class="mkt-vtag">VALUE</span>`:""}
@@ -1770,7 +1850,7 @@ function buildCCTab(p,c1,c2){
 
   // Cards
   if(p.cardMarkets?.length){
-    h+=`<div class="cc-section"><div class="sec-ttl"><i class="ti ti-cards"></i> Card Markets</div><div class="mkt-grid">${p.cardMarkets.map(m=>{
+    h+=`<div class="cc-section"><div class="sec-ttl"><i class="ti ti-cards"></i> Card Markets</div><div class="mkt-grid">${(p.cardMarkets||[]).map(m=>{
       const cc=cconf(m.confidence);
       return`<div class="mkt-card${m.value?" val":""}">
         ${m.value?`<span class="mkt-vtag">VALUE</span>`:""}
@@ -1899,7 +1979,7 @@ function sharePredict(){
 
 // ── SAVE TO HISTORY ──
 function saveToHistory(){
-  if(!curPred)return;
+  if(!curPred||!curPred.team1||!curPred.team2)return;
   const p=curPred,mp=p.mainPrediction;
   const hist=getLS(LS.HIST,[]);
   const marketType=mp?.market||"1X2";
@@ -1913,7 +1993,7 @@ function saveToHistory(){
 function addToAcca(){
   if(!curPred)return;
   const p=curPred,mp=p.mainPrediction;
-  if(!mp){toast("No main prediction to add");return}
+  if(!mp||!mp.pick||mp.pick==="—"){toast("No valid prediction to add");return}
   if(acca.find(a=>a.team1===p.team1&&a.team2===p.team2)){toast("Match already in Acca slip");return}
   if(acca.length>=8){toast("Max 8 legs");return}
   acca.push({id:Date.now()+"",team1:p.team1,team2:p.team2,competition:p.competition,pick:`${mp.market}: ${mp.pick}`,odds:mp.odds,confidence:mp.confidence});

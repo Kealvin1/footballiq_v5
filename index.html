@@ -291,13 +291,13 @@ select option{background:var(--card2)}
 .cot-txt{font-size:12px;color:var(--t2);line-height:1.7;white-space:pre-line}
 
 /* ── TABS ───────────────────────────────────────────────────── */
-.tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:16px;overflow-x:auto;scrollbar-width:none;gap:0}
+.tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:16px;overflow-x:auto;scrollbar-width:none;gap:0;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity}
 .tabs::-webkit-scrollbar{display:none}
 .tbtn{
   background:transparent;border:none;
   border-bottom:2px solid transparent;
-  color:var(--t2);padding:10px 13px;font-size:11px;font-weight:700;
-  letter-spacing:0.06em;text-transform:uppercase;cursor:pointer;
+  color:var(--t2);padding:9px 10px;font-size:10px;font-weight:700;
+  letter-spacing:0.05em;text-transform:uppercase;cursor:pointer;
   white-space:nowrap;border-radius:0;
   display:flex;align-items:center;gap:5px;transition:all .2s;flex-shrink:0;
 }
@@ -349,12 +349,12 @@ select option{background:var(--card2)}
 .vbet-rsn{font-size:12px;color:var(--t2);line-height:1.6}
 
 /* ── INJURIES ───────────────────────────────────────────────── */
-.inj-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.inj-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
 .inj-card{background:var(--card2);border:1px solid var(--border);border-radius:var(--rs);padding:11px 14px}
-.inj-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.inj-row{display:flex;flex-direction:column;align-items:flex-start;gap:5px;margin-bottom:6px}
 .inj-name{font-size:13px;font-weight:600}
-.s-out{font-size:9px;padding:3px 8px;border-radius:5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;background:var(--ruby-g);color:var(--ruby)}
-.s-doubt{font-size:9px;padding:3px 8px;border-radius:5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;background:var(--amr-g);color:var(--amr)}
+.s-out{font-size:9px;padding:3px 8px;border-radius:5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:var(--ruby-g);color:var(--ruby);white-space:normal;line-height:1.4;word-break:break-word;max-width:100%}
+.s-doubt{font-size:9px;padding:3px 8px;border-radius:5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:var(--amr-g);color:var(--amr);white-space:normal;line-height:1.4;word-break:break-word;max-width:100%}
 .inj-meta{font-size:11px;color:var(--t3)}
 
 /* ── MARKETS ────────────────────────────────────────────────── */
@@ -773,7 +773,7 @@ select option{background:var(--card2)}
       <button class="tbtn"        id="tb-cc"        onclick="setTab('cc')"><i class="ti ti-cards"></i> Corners &amp; Cards</button>
       <button class="tbtn"        id="tb-odds"      onclick="setTab('odds')"><i class="ti ti-refresh-alert"></i> Odds</button>
       <button class="tbtn"        id="tb-scores"    onclick="setTab('scores')"><i class="ti ti-target"></i> Scores</button>
-      <button class="tbtn"        id="tb-players"   onclick="setTab('players')"><i class="ti ti-run"></i> Goalscorers</button>
+      <button class="tbtn"        id="tb-players"   onclick="setTab('players')"><i class="ti ti-run"></i> Scorers</button>
       <button class="tbtn"        id="tb-form"      onclick="setTab('form')"><i class="ti ti-activity"></i> Form</button>
     </div>
     <div id="tc-overview"></div>
@@ -1209,7 +1209,18 @@ function advanceStep(phase,totalSteps){
   $("phase-fill").style.width=pct+"%";
 }
 
-async function doAnalyze(){
+
+// ── REFRESH: clear cache for current match and re-run fresh ──────────
+function refreshAnalysis(){
+  if(!_curCacheKey){doAnalyze(true);return}
+  cacheSet(_curCacheKey,null); // delete this match from cache
+  hide("results-section");show("form-section");
+  // Brief delay so user sees the form before analysis starts
+  setTimeout(()=>doAnalyze(true),100);
+}
+
+let _curCacheKey=""; // track so Refresh button can clear it
+async function doAnalyze(forceRefresh=false){
   const t1=$("t1").value.trim(),t2=$("t2").value.trim(),comp=$("comp").value;
   const mode=$("mode-select").value;
   if(!t1||!t2){toast("Enter both team names");return}
@@ -1217,13 +1228,15 @@ async function doAnalyze(){
   // Check cache
   const cacheKey=`${t1}|${t2}|${comp}|${mode}`.toLowerCase().replace(/\s/g,"_");
   const cached=cacheGet(cacheKey);
-  if(cached){
+  _curCacheKey=cacheKey;
+  if(cached&&!forceRefresh){
     startLoading(t1,t2,comp);
     $("phase-fill").style.width="100%";
     $("phase-fill").style.background="var(--green)";
-    setTimeout(()=>{hide("loading-section");renderResults(cached,true)},400);
+    setTimeout(()=>{hide("loading-section");renderResults({...cached,_fromCache:true},true)},400);
     return;
   }
+  if(forceRefresh) cacheSet(cacheKey,null); // clear stale cache
 
   startLoading(t1,t2,comp);
 
@@ -1315,9 +1328,11 @@ async function doAnalyze(){
     p._movement = lineMovement;
     curPred = p;
 
+    _curCacheKey=cacheKey;
     const toCache={...p};
     delete toCache._liveOdds;
     delete toCache._movement;
+    toCache._cachedAt=Date.now();
     cacheSet(cacheKey, toCache);
 
     setTimeout(()=>{hide("loading-section");renderResults(p,false)},400);
@@ -1663,7 +1678,9 @@ function renderResults(p,fromCache){
   {const mp=p.mainPrediction||{market:'1X2',pick:'—',odds:'—',confidence:0,value:false};
     html("top-pred",`<div><div class="tp-lbl">TOP PREDICTION</div><div class="tp-pick">${mp.market}: ${mp.pick}</div></div><div><div class="tp-odds">${mp.odds}</div><div class="tp-conf">${mp.confidence}% confidence${mp.value?`<span class="vtag">value</span>`:""}</div></div>`);
   }
-  html("action-bar",`<button class="btn-sm" onclick="addToAcca()"><i class="ti ti-plus"></i> Add to Acca</button><button class="btn-ghost" onclick="sharePredict()" style="font-size:11px;padding:6px 13px"><i class="ti ti-share"></i> Share</button>`);
+  const _cacheAge=curPred?._cachedAt?Math.round((Date.now()-curPred._cachedAt)/60000):0;
+  const _cacheLabel=_cacheAge>0?`<span class="cache-tag"><i class="ti ti-clock" style="font-size:10px"></i> Cached ${_cacheAge<60?_cacheAge+"m ago":Math.round(_cacheAge/60)+"h ago"}</span>`:"";
+  html("action-bar",`<button class="btn-sm" onclick="addToAcca()"><i class="ti ti-plus"></i> Add to Acca</button><button class="btn-ghost" onclick="refreshAnalysis()" title="Clear cache and re-run with latest data" style="font-size:11px;padding:6px 13px"><i class="ti ti-refresh-alert"></i> Refresh</button><button class="btn-ghost" onclick="sharePredict()" style="font-size:11px;padding:6px 13px"><i class="ti ti-share"></i> Share</button>${_cacheLabel}`);
 
   if(p.analystNote){show("an-note");txt("an-txt",p.analystNote)}else hide("an-note");
   if(p.chainOfThought){show("cot-box");txt("cot-txt",p.chainOfThought)}else hide("cot-box");

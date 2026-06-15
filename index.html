@@ -1046,7 +1046,7 @@ async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="c
   if(useSearch)body.tools=[{type:"web_search_20250305",name:"web_search"}];
   if(systemPrompt)body.system=systemPrompt;
   const controller=new AbortController();
-  const timeout=setTimeout(()=>controller.abort(),120000); // 2 min timeout
+  const timeout=setTimeout(()=>controller.abort(),270000); // 4.5 min timeout per call
   let res;
   try{
     res=await fetch("https://api.anthropic.com/v1/messages",{
@@ -1057,7 +1057,7 @@ async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="c
     });
   }catch(fe){
     clearTimeout(timeout);
-    if(fe.name==="AbortError")throw new Error("Request timed out (2 min). Please try again.");
+    if(fe.name==="AbortError")throw new Error("Request timed out (>4 min). Anthropic may be busy — please try again.");
     throw new Error("Network error: "+fe.message);
   }finally{clearTimeout(timeout)}
   // Handle HTTP errors (401 wrong key, 429 rate limit, 529 overloaded, etc.)
@@ -1330,7 +1330,7 @@ async function doAnalyze(){
       : e.message==="__MALFORMED__"
       ? "AI response format error. Please try again."
       : (e.message||"").includes("timed out")
-      ? "Analysis timed out (>2 min). Check your internet and try again."
+      ? "Analysis timed out (>4 min). Anthropic may be busy — please try again in a moment."
       : (e.message||"").includes("Network error")
       ? "Network error. Check your internet connection."
       : e.message==="No API key configured."

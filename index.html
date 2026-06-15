@@ -1536,7 +1536,7 @@ STEP 4 — CONTEXT & PSYCHOLOGY: What are the stakes? Any motivation imbalances?
 STEP 5 — PHYSICAL FACTORS: How do weather, fatigue, and travel affect the game and specific markets?
 STEP 6 — REFEREE INFLUENCE: How does this referee's style affect cards, penalties and match tempo?
 STEP 7 — CORNERS ANALYSIS: Pressing intensity, set piece specialists, defensive shape → corner volume expected?
-STEP 8 — MARKET VALUE: For each key market, compute: implied_probability = 1/odds. Compare to your estimated true_probability. Only mark value=true when edge = (true_prob - implied_prob) / implied_prob > 0.05 (5%+ edge). Show the calculation. This prevents false value flags.
+STEP 8 — MARKET VALUE: For each key market, compute: implied_probability = 1/odds. Also analyse the 10 additionalMarkets — use xG data for goals markets, HT xG splits for First Half 1X2, referee stats for Penalty, team xGA for Clean Sheet. Compare to your estimated true_probability. Only mark value=true when edge = (true_prob - implied_prob) / implied_prob > 0.05 (5%+ edge). Show the calculation. This prevents false value flags.
 
 After reasoning, output ONLY a valid JSON object (NO markdown, NO code fences (no backticks), NO comments, NO trailing commas. Start your response with { and end with }. Precise confidence values like 63, 71, 58 — never multiples of 5. Keep "reasoning" under 12 words, "chainOfThought" under 80 words):
 {
@@ -1614,6 +1614,18 @@ After reasoning, output ONLY a valid JSON object (NO markdown, NO code fences (n
   },
   "headToHead":{"team1Wins":5,"draws":3,"team2Wins":2,"lastMeeting":"2-1 ${t1} (2024)","avgGoals":2.6,"totalMeetings":10},
   "valueBets":[{"market":"Over/Under 2.5 Goals","pick":"Under 2.5","odds":1.90,"trueOdds":1.62,"edge":17,"reasoning":"specific evidence"}],
+  "additionalMarkets":[
+    {"market":"First Half 1X2","pick":"Home Win HT","odds":2.50,"confidence":52,"value":false,"reasoning":"concise reason"},
+    {"market":"Over/Under 1.5 Goals","pick":"Over 1.5","odds":1.40,"confidence":74,"value":false,"reasoning":"concise reason"},
+    {"market":"Over/Under 3.5 Goals","pick":"Under 3.5","odds":1.55,"confidence":68,"value":false,"reasoning":"concise reason"},
+    {"market":"Clean Sheet - ${t1}","pick":"Yes","odds":2.20,"confidence":41,"value":false,"reasoning":"concise reason"},
+    {"market":"Clean Sheet - ${t2}","pick":"No","odds":1.45,"confidence":63,"value":false,"reasoning":"concise reason"},
+    {"market":"Win to Nil - ${t1}","pick":"Yes","odds":3.50,"confidence":31,"value":false,"reasoning":"concise reason"},
+    {"market":"Score Draw","pick":"Yes","odds":3.80,"confidence":28,"value":false,"reasoning":"concise reason"},
+    {"market":"European Handicap -1","pick":"${t1}","odds":3.20,"confidence":38,"value":false,"reasoning":"concise reason"},
+    {"market":"BTTS + Over 2.5","pick":"Yes","odds":2.10,"confidence":44,"value":false,"reasoning":"concise reason"},
+    {"market":"Penalty to be Awarded","pick":"Yes","odds":2.40,"confidence":39,"value":false,"reasoning":"referee-based reason"}
+  ],
   "riskLevel":"Medium",
   "analystNote":"2-3 sentence expert summary of this prediction backed by the intelligence gathered.",
   "dataQuality":"High",
@@ -1668,8 +1680,9 @@ function buildAllTabs(p,c1,c2){
   if(p.keyFactors?.length){
     ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-list-check"></i> Key factors</div><div class="factors">${(p.keyFactors||[]).map((f,i)=>`<div class="factor"><span class="fnum">${i+1}</span><p>${f}</p></div>`).join("")}</div></div>`;
   }
-  if(p.valueBets?.length){
-    ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-diamond"></i> Value bets</div>${(p.valueBets||[]).map(vb=>`
+  const _allVB=[...(p.valueBets||[]),...(p.additionalMarkets||[]).filter(m=>m&&m.value)];
+  if(_allVB.length){
+    ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-diamond"></i> Value bets</div>${_allVB.map(vb=>`
       <div class="vbet"><div class="vbet-hdr"><div><div class="vbet-mkt">${vb.market}</div><div class="vbet-pick">${vb.pick}</div></div>
         <div class="odds-row"><div class="odds-col"><div class="lbl">Market</div><div class="val" style="color:${GREEN}">${vb.odds}</div></div>
         ${vb.trueOdds?`<div class="odds-col odds-div"><div class="lbl">Fair</div><div class="val">${vb.trueOdds}</div></div>`:""}
@@ -1688,16 +1701,32 @@ function buildAllTabs(p,c1,c2){
   buildIntelTab(p,c1,c2);
 
   // MARKETS
-  html("tc-markets",`<div class="mkt-grid">${(p.predictions||[]).filter(Boolean).map(m=>{
+  const _mkHtml=(()=>{
+  const mainMkts=(p.predictions||[]).filter(Boolean).map(m=>{
     const cc=cconf(m.confidence);
     return`<div class="mkt-card${m.value?" val":""}">
       ${m.value?`<span class="mkt-vtag">VALUE</span>`:""}
       <div class="mkt-name">${(m.market||"").toUpperCase()}</div>
       <div class="mkt-row"><span class="mkt-pick">${m.pick}</span><span class="mkt-odds">${m.odds}</span></div>
       ${confBar(m.confidence,cc)}
-      ${m.reasoning?`<div class="mkt-rsn">${m.reasoning}</div>`:""}
-    </div>`;
-  }).join("")}</div>`);
+      ${m.reasoning?`<div class="mkt-rsn">${m.reasoning}</div>`:""}</div>`;
+  }).join("");
+  const addl=(p.additionalMarkets||[]).filter(Boolean).map(m=>{
+    const cc=cconf(m.confidence);
+    return`<div class="mkt-card${m.value?" val":""}">
+      ${m.value?`<span class="mkt-vtag">VALUE</span>`:""}
+      <div class="mkt-name">${(m.market||"").toUpperCase()}</div>
+      <div class="mkt-row"><span class="mkt-pick">${m.pick}</span><span class="mkt-odds">${m.odds}</span></div>
+      ${confBar(m.confidence,cc)}
+      ${m.reasoning?`<div class="mkt-rsn">${m.reasoning}</div>`:""}</div>`;
+  }).join("");
+  return`<div class="mkt-grid">${mainMkts}</div>${addl?`
+    <div style="margin-top:20px">
+      <div class="sec-ttl" style="margin-bottom:10px"><i class="ti ti-chart-bar" style="color:var(--gold)"></i> ADDITIONAL MARKETS</div>
+      <div class="mkt-grid">${addl}</div>
+    </div>`:""}`;
+})();
+  html("tc-markets",_mkHtml);
 
   // CORNERS & CARDS
   buildCCTab(p,c1,c2);

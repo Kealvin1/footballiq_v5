@@ -718,15 +718,10 @@ select option{background:var(--card2)}
         <optgroup label="Other"><option>Friendlies</option></optgroup>
       </select>
     </div>
-    <div class="mb16" style="display:flex;align-items:center;gap:10px">
-      <label class="flabel" style="margin:0;white-space:nowrap">Mode:</label>
-      <select id="mode-select" style="flex:1">
-        <option value="standard">Standard (24h+ before kickoff)</option>
-        <option value="dayof">Day-Of (lineups confirmed)</option>
-      </select>
-    </div>
+    <!-- Mode auto-detected: app searches for confirmed lineups,
+         falls back to predicted if not yet available -->
     <button class="btn" onclick="doAnalyze()"><i class="ti ti-brain"></i> Run Analysis</button>
-    <p class="hint">2-phase AI pipeline · Live web search · 71 competitions</p>
+    <p class="hint">Auto-detects confirmed lineups · Live web search · 71 competitions</p>
   </div>
 
   <div class="card hidden" id="loading-section">
@@ -1222,11 +1217,10 @@ function refreshAnalysis(){
 let _curCacheKey=""; // track so Refresh button can clear it
 async function doAnalyze(forceRefresh=false){
   const t1=$("t1").value.trim(),t2=$("t2").value.trim(),comp=$("comp").value;
-  const mode=$("mode-select").value;
   if(!t1||!t2){toast("Enter both team names");return}
 
   // Check cache
-  const cacheKey=`${t1}|${t2}|${comp}|${mode}`.toLowerCase().replace(/\s/g,"_");
+  const cacheKey=`${t1}|${t2}|${comp}`.toLowerCase().replace(/\s/g,"_");
   const cached=cacheGet(cacheKey);
   _curCacheKey=cacheKey;
   if(cached&&!forceRefresh){
@@ -1268,7 +1262,7 @@ async function doAnalyze(forceRefresh=false){
     setPhase(1);curStep=0;renderSteps(0,1);
     startStepTimer(1);
 
-    const intelPrompt = buildIntelPrompt(t1,t2,comp,mode,xg1,xg2,lineMovement);
+    const intelPrompt = buildIntelPrompt(t1,t2,comp,xg1,xg2,lineMovement);
     let intel;
     try{
       intel = await callAI(intelPrompt, 4000, true, "", "claude-haiku-4-5-20251001");
@@ -1289,7 +1283,7 @@ async function doAnalyze(forceRefresh=false){
     setPhase(2);curStep=0;renderSteps(0,2);
     startStepTimer(2);
 
-    const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,mode,intel,xg1,xg2,refStats);
+    const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats);
     let rawAnalysis;
     try{
       rawAnalysis = await callAI(analysisPrompt, 8192, false, ANALYST_SYSTEM);
@@ -1429,30 +1423,46 @@ function extractRefereeName(intel){
   return null;
 }
 
-function buildIntelPrompt(t1,t2,comp,mode,xg1,xg2,movement){
-  const dayof=mode==="dayof";
-  return`You are a football intelligence analyst. Use web search to research everything about this match:
+function buildIntelPrompt(t1,t2,comp,xg1,xg2,movement){
+
+  // Build real-data injection block
+  const xgBlock=xg1&&xg2?`
+=== PRE-LOADED XG DATA (do not search for these) ===
+${t1}: ${xg1.avg_xGF} xGF / ${xg1.avg_xGA} xGA avg | Home: ${xg1.home_avg_xGF}/${xg1.home_avg_xGA} | Away: ${xg1.away_avg_xGF}/${xg1.away_avg_xGA} | ${xg1.regression}
+${t2}: ${xg2.avg_xGF} xGF / ${xg2.avg_xGA} xGA avg | Home: ${xg2.home_avg_xGF}/${xg2.home_avg_xGA} | Away: ${xg2.away_avg_xGF}/${xg2.away_avg_xGA} | ${xg2.regression}
+=== END XG DATA ===`:"";
+
+  const movBlock=movement&&movement.length>0?`
+=== ODDS MOVEMENT ===
+${movement.slice(0,2).map(m=>`${m.home_team} vs ${m.away_team}: ${m.signal}`).join("\n")}
+=== END MOVEMENT ===`:"";
+
+  return`You are a football intelligence analyst. Use web search to research this match:
 
 ${t1} vs ${t2} — ${comp}
-${dayof?"⚡ DAY-OF MODE: Focus on confirmed lineups available right now.":"📅 PRE-MATCH MODE: Predict probable lineups based on recent selections."}
+${xgBlock}
+${movBlock}
 
-RUN 4 TARGETED WEB SEARCHES for best data quality:
+LINEUP DETECTION — CRITICAL FIRST STEP:
+Search for confirmed starting XIs right now. Two scenarios apply:
+→ CONFIRMED (within ~90 min of kickoff): Official lineups published by club or competition. Use real player names, positions and formation exactly.
+→ NOT YET CONFIRMED (match is hours away): Predict the most likely XI from recent selections, injuries, rotation patterns and manager tendencies. Label clearly as PREDICTED.
 
-Search 1 → "[team names] lineup injury suspension news [competition]"
-  Find: ${dayof?"CONFIRMED starting XIs":"predicted lineups"}, formations, key absences, manager quotes
+At the top of your response always write: "LINEUPS: [CONFIRMED ✓ / PREDICTED ~]" and state which scenario applies.
 
-Search 2 → "[team1] recent results xG form" AND "[team2] recent results xG form"
-  Find: Last 6-8 results with EXACT scores, home/away split, xG data if available, goal patterns
+RUN 3 TARGETED WEB SEARCHES:
 
-Search 3 → "[team1] vs [team2] head to head history referee [competition]"
-  Find: H2H record last 5 meetings, assigned referee stats (cards/game, penalty rate, bias), venue, standings
+Search 1 → "${t1} ${t2} lineup confirmed starting XI team news injury"
+  Find: Official lineups if published, or latest injury/suspension news and predicted XIs. Manager quotes about selections.
 
-Search 4 → "[team1] [team2] odds preview betting tips [competition]"
-  Find: Current market odds, any significant line movement, sharp money signals, expert previews, weather at venue
+Search 2 → "${t1} ${t2} head to head referee ${comp} 2025 2026"
+  Find: H2H last 5 results with exact scores, assigned referee name and reputation, venue, competition standings and stakes.
+
+Search 3 → "${t1} ${t2} preview weather odds ${comp}"
+  Find: Weather forecast at venue, competition context, current market odds, any line movement or sharp money signals.
 
 Be specific — real player names, exact scores, real statistics only.`;
 }
-
 
 // ── CALIBRATION MEMO — feeds prediction history back into Phase 2 ──
 function getCalibrationMemo(){
@@ -1517,7 +1527,7 @@ self-calibrate to real-world accuracy over time.
 `;
 }
 
-function buildAnalysisPrompt(t1,t2,comp,mode,intel,xg1,xg2,refStats){
+function buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats){
   return`You are a world-class football betting analyst with expertise in statistical modelling and market efficiency.
 
 Here is the pre-match intelligence gathered for ${t1} vs ${t2} (${comp}):
@@ -1544,7 +1554,7 @@ Regression signals: ${t1} ${xg1.regression} | ${t2} ${xg2.regression}
 ${getCalibrationMemo()}
 Now reason through this match step by step before producing your final output:
 
-STEP 1 — SQUAD STRENGTH: Compare both starting XIs. Who has the edge position by position? How do absences affect each team?
+STEP 1 — SQUAD: Phase 1 flagged lineups as CONFIRMED ✓ (use as facts) or PREDICTED ~ (factor uncertainty into confidence). Compare XIs and assess absences impact.
 STEP 2 — FORM & xG: Analyse HOME form and AWAY form SEPARATELY — this is critical. Many teams play very differently home vs away. Also: if actual goals scored/conceded deviates from xG by >0.3 per game over last 5 matches, explicitly model regression toward xG mean in your Over/Under and BTTS predictions. State the direction and magnitude of expected correction.
 STEP 3 — TACTICAL MATCHUP: How do their systems interact? Any structural mismatches to exploit?
 STEP 4 — CONTEXT & PSYCHOLOGY: What are the stakes? Any motivation imbalances? Home/away form split?

@@ -1042,7 +1042,9 @@ async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt=""){
     body:JSON.stringify(body)
   });
   const d=await res.json();
-  if(d.error)throw new Error(d.error.message);
+  if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));
+  // Detect token truncation — incomplete JSON would fail to parse
+  if(d.stop_reason==="max_tokens")throw new Error("__TRUNCATED__");
   return d.content.filter(b=>b.type==="text").map(b=>b.text).join("\n");
 }
 
@@ -1193,7 +1195,7 @@ async function doAnalyze(){
     startStepTimer(1);
 
     const intelPrompt = buildIntelPrompt(t1,t2,comp,mode,xg1,xg2,lineMovement);
-    const intel = await callAI(intelPrompt, 3000, true);
+    const intel = await callAI(intelPrompt, 4000, true);
 
     clearInterval(stepTmr);renderSteps(STEPS_P1.length,1);
 
@@ -1207,7 +1209,20 @@ async function doAnalyze(){
     startStepTimer(2);
 
     const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,mode,intel,xg1,xg2,refStats);
-    const rawAnalysis = await callAI(analysisPrompt, 6000, false, ANALYST_SYSTEM);
+    let rawAnalysis;
+    try{
+      rawAnalysis = await callAI(analysisPrompt, 8192, false, ANALYST_SYSTEM);
+    }catch(e){
+      if(e.message==="__TRUNCATED__"){
+        // Response was cut off — retry asking for more compact output
+        toast("Optimising response length — retrying...", 3000);
+        const retryPrompt = analysisPrompt +
+          "\n\nCRITICAL: Previous attempt was too long and got cut off. "+
+          "Be extremely concise. Limit reasoning fields to 8 words max. "+
+          "Skip oddsComparison array entirely (use []). Output valid complete JSON under 6000 tokens.";
+        rawAnalysis = await callAI(retryPrompt, 8192, false, ANALYST_SYSTEM);
+      } else { throw e; }
+    }
 
     clearInterval(stepTmr);
     $("phase-fill").style.width="100%";
@@ -1228,7 +1243,12 @@ async function doAnalyze(){
   }catch(e){
     clearInterval(stepTmr);
     hide("loading-section");show("form-section");
-    html("err-msg",`<i class="ti ti-alert-circle"></i> ${e.message||"Analysis failed. Please try again."}`);
+    const errMsg = e.message==="__TRUNCATED__"
+      ? "Response was too long even after retry. Try a simpler competition or check your Anthropic account limits."
+      : e.message==="No API key configured."
+      ? "Add your Anthropic API key in ⚙ Settings first."
+      : e.message||"Analysis failed. Please try again.";
+    html("err-msg",`<i class="ti ti-alert-circle"></i> ${errMsg}`);
     show("error-section");
   }
 }
@@ -1464,11 +1484,9 @@ After reasoning, output ONLY a valid JSON object (no markdown, no code fences. U
     {"pick":"2/2","odds":5.50,"probability":10,"reasoning":"away team form"}
   ],
   "oddsComparison":[
-    {"bookmaker":"1xBet","w1":2.10,"draw":3.60,"w2":3.20,"over25":1.92,"under25":1.88,"bttsY":1.80,"bttsN":1.95},
     {"bookmaker":"Bet365","w1":2.05,"draw":3.55,"w2":3.25,"over25":1.90,"under25":1.90,"bttsY":1.83,"bttsN":1.92},
     {"bookmaker":"William Hill","w1":2.00,"draw":3.50,"w2":3.30,"over25":1.88,"under25":1.92,"bttsY":1.78,"bttsN":1.97},
-    {"bookmaker":"Betway","w1":2.15,"draw":3.65,"w2":3.15,"over25":1.95,"under25":1.86,"bttsY":1.82,"bttsN":1.93},
-    {"bookmaker":"Unibet","w1":2.08,"draw":3.58,"w2":3.22,"over25":1.91,"under25":1.89,"bttsY":1.81,"bttsN":1.94}
+    {"bookmaker":"Betway","w1":2.15,"draw":3.65,"w2":3.15,"over25":1.95,"under25":1.86,"bttsY":1.82,"bttsN":1.93}
   ],
   "intelligence":{
     "team1Lineup":["GK: Name","RB: Name","CB: Name","CB: Name","LB: Name","CM: Name","CM: Name","CM: Name","RW: Name","ST: Name","LW: Name"],

@@ -1318,6 +1318,40 @@ function goHome(){
   show("form-section");
 }
 
+
+// ── LINEUP STATUS: render badges + allow manual correction ───────────
+function renderLineupBadges(status){
+  const _lsEl=document.getElementById("lineup-status-badge");
+  if(_lsEl){
+    _lsEl.style.cursor="pointer";_lsEl.title="Click to correct if needed";
+    if(status==="confirmed"){
+      _lsEl.innerHTML='<i class="ti ti-check"></i> Lineups Confirmed';
+      _lsEl.style.cssText="cursor:pointer;background:rgba(0,200,150,0.12);color:#00c896;border:1px solid rgba(0,200,150,0.3);font-size:10px;font-weight:800;padding:3px 10px;border-radius:6px;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px";
+    }else if(status==="predicted"){
+      _lsEl.innerHTML='<i class="ti ti-dots"></i> Lineups Predicted';
+      _lsEl.style.cssText="cursor:pointer;background:rgba(255,184,48,0.1);color:#ffb830;border:1px solid rgba(255,184,48,0.3);font-size:10px;font-weight:800;padding:3px 10px;border-radius:6px;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px";
+    }else{_lsEl.style.display="none";}
+  }
+  const _intelEl=document.getElementById("intel-lineup-badge");
+  if(_intelEl){
+    _intelEl.innerHTML=status==="confirmed"
+      ? ' <span style="font-size:9px;font-weight:800;background:rgba(0,200,150,0.12);color:#00c896;border:1px solid rgba(0,200,150,0.3);padding:2px 8px;border-radius:5px;margin-left:6px;letter-spacing:.06em">✓ CONFIRMED</span>'
+      : status==="predicted"
+      ? ' <span style="font-size:9px;font-weight:800;background:rgba(255,184,48,0.1);color:#ffb830;border:1px solid rgba(255,184,48,0.3);padding:2px 8px;border-radius:5px;margin-left:6px;letter-spacing:.06em">~ PREDICTED</span>'
+      : "";
+  }
+}
+function toggleLineupStatus(){
+  if(!curPred)return;
+  curPred._lineupStatus = curPred._lineupStatus==="confirmed" ? "predicted" : "confirmed";
+  if(_curCacheKey){
+    const cached=cacheGet(_curCacheKey);
+    if(cached){cached._lineupStatus=curPred._lineupStatus;cacheSet(_curCacheKey,cached)}
+  }
+  renderLineupBadges(curPred._lineupStatus);
+  toast(curPred._lineupStatus==="confirmed"?"Marked as Confirmed ✓ — you know the real lineup":"Marked as Predicted ~");
+}
+
 let _curCacheKey=""; // track so Refresh button can clear it
 async function doAnalyze(forceRefresh=false){
   const t1=$("t1").value.trim(),t2=$("t2").value.trim(),comp=$("comp").value;
@@ -1555,16 +1589,17 @@ ${xgBlock}
 ${movBlock}
 
 LINEUP DETECTION — CRITICAL FIRST STEP:
-Search for confirmed starting XIs right now. Two scenarios apply:
-→ CONFIRMED (within ~90 min of kickoff): Official lineups published by club or competition. Use real player names, positions and formation exactly.
-→ NOT YET CONFIRMED (match is hours away): Predict the most likely XI from recent selections, injuries, rotation patterns and manager tendencies. Label clearly as PREDICTED.
+Search aggressively for confirmed starting XIs. Try multiple angles: "starting XI announced", "lineups out", "confirmed team news", official club/competition social posts, or live match-day coverage.
 
-At the top of your response always write: "LINEUPS: [CONFIRMED ✓ / PREDICTED ~]" and state which scenario applies.
+→ CONFIRMED: You found specific named players with positions from any credible source (club account, major sports outlet, live match coverage, official competition feed) reporting the ACTUAL starting eleven for this specific match — not a general squad list or historical lineup. If the source presents these 11 names as the team that is playing (even if the source itself doesn't use the word "official"), treat this as CONFIRMED. Do not under-label real, specific, source-backed lineups as merely "predicted" out of excess caution.
+→ PREDICTED: You only found general squad news, injury reports, or explicit "predicted/expected lineup" speculation pieces with no specific source confirming these are the actual starting players for today's match.
+
+At the top of your response always write: "LINEUPS: [CONFIRMED ✓ / PREDICTED ~]" and state which scenario applies and why (one sentence).
 
 RUN 3 TARGETED WEB SEARCHES:
 
-Search 1 → "${t1} ${t2} lineup confirmed starting XI team news injury"
-  Find: Official lineups if published, or latest injury/suspension news and predicted XIs. Manager quotes about selections.
+Search 1 → "${t1} ${t2} confirmed lineup starting XI today"
+  Find: The actual starting eleven if announced for this match. Try a second search "${t1} vs ${t2} team news lineups out" if the first doesn't surface a clear answer.. Manager quotes about selections.
 
 Search 2 → "${t1} ${t2} head to head referee ${comp} 2025 2026"
   Find: H2H last 5 results with exact scores, assigned referee name and reputation, venue, competition standings and stakes.
@@ -1795,17 +1830,7 @@ function renderResults(p,fromCache){
   $("r-risk").textContent=`${p.riskLevel||"Medium"} risk`;
   $("r-risk").style.cssText=`background:${rc}18;color:${rc}`;
   // Show lineup status badge
-  const _ls=p._lineupStatus||"unknown";
-  const _lsEl=document.getElementById("lineup-status-badge");
-  if(_lsEl){
-    if(_ls==="confirmed"){
-      _lsEl.innerHTML='<i class="ti ti-check"></i> Lineups Confirmed';
-      _lsEl.style.cssText="background:rgba(0,200,150,0.12);color:#00c896;border:1px solid rgba(0,200,150,0.3);font-size:10px;font-weight:800;padding:3px 10px;border-radius:6px;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px";
-    }else if(_ls==="predicted"){
-      _lsEl.innerHTML='<i class="ti ti-dots"></i> Lineups Predicted';
-      _lsEl.style.cssText="background:rgba(255,184,48,0.1);color:#ffb830;border:1px solid rgba(255,184,48,0.3);font-size:10px;font-weight:800;padding:3px 10px;border-radius:6px;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px";
-    }else{_lsEl.style.display="none";}
-  }
+  renderLineupBadges(p._lineupStatus);
 
   const wp=p.winProbabilities||{team1:45,draw:25,team2:30};
   // Normalise so bars always sum to 100%
@@ -1956,7 +1981,7 @@ function buildIntelTab(p,c1,c2){
 
   // Lineups
   if(intel.team1Lineup?.length||intel.team2Lineup?.length){
-    h+=`<div class="card"><div class="sec-ttl"><i class="ti ti-users"></i> Lineups${p._lineupStatus==="confirmed"?` <span style="font-size:9px;font-weight:800;background:rgba(0,200,150,0.12);color:#00c896;border:1px solid rgba(0,200,150,0.3);padding:2px 8px;border-radius:5px;margin-left:6px;letter-spacing:.06em">✓ CONFIRMED</span>`:p._lineupStatus==="predicted"?` <span style="font-size:9px;font-weight:800;background:rgba(255,184,48,0.1);color:#ffb830;border:1px solid rgba(255,184,48,0.3);padding:2px 8px;border-radius:5px;margin-left:6px;letter-spacing:.06em">~ PREDICTED</span>`:""}</div>
+    h+=`<div class="card"><div class="sec-ttl"><i class="ti ti-users"></i> Lineups<span id="intel-lineup-badge" style="cursor:pointer" title="Click to correct if needed" onclick="toggleLineupStatus()">${p._lineupStatus==="confirmed"?` <span style="font-size:9px;font-weight:800;background:rgba(0,200,150,0.12);color:#00c896;border:1px solid rgba(0,200,150,0.3);padding:2px 8px;border-radius:5px;margin-left:6px;letter-spacing:.06em">✓ CONFIRMED</span>`:p._lineupStatus==="predicted"?` <span style="font-size:9px;font-weight:800;background:rgba(255,184,48,0.1);color:#ffb830;border:1px solid rgba(255,184,48,0.3);padding:2px 8px;border-radius:5px;margin-left:6px;letter-spacing:.06em">~ PREDICTED</span>`:""}</span></div>
       <div class="two-col">
         <div><div class="lineup-team" style="color:${c1}">${p.team1} (${intel.team1Formation||""})</div>${(intel.team1Lineup||[]).map(pl=>`<div class="lineup-player"><span class="pos-tag" style="background:${c1}18;color:${c1}">${pl.split(":")[0]||""}</span>${pl.split(":")[1]?.trim()||pl}</div>`).join("")}</div>
         <div><div class="lineup-team" style="color:${c2}">${p.team2} (${intel.team2Formation||""})</div>${(intel.team2Lineup||[]).map(pl=>`<div class="lineup-player"><span class="pos-tag" style="background:${c2}18;color:${c2}">${pl.split(":")[0]||""}</span>${pl.split(":")[1]?.trim()||pl}</div>`).join("")}</div>

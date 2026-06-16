@@ -976,6 +976,7 @@ const html=(id,v)=>$(id).innerHTML=v;
 function inits(n){const p=(n||"?").split(/[\s\-\.]+/).filter(Boolean);return p.length===1?p[0].slice(0,3).toUpperCase():p.map(w=>w[0]).join("").slice(0,3).toUpperCase()}
 function cconf(v){return v>=70?"#c9a84c":v>=55?"#ffb830":"#ff4d6a"}
 function confBar(v,c="#1D9E75"){return`<div class="conf-wrap"><div class="conf-track"><div class="conf-fill" style="width:${Math.min(v,100)}%;background:${c}"></div></div><span class="conf-pct">${v}%</span></div>`}
+function confBarNoLabel(v,c="#1D9E75"){return`<div class="conf-wrap"><div class="conf-track"><div class="conf-fill" style="width:${Math.min(v,100)}%;background:${c}"></div></div></div>`}
 function fmtDate(iso){return new Date(iso).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}
 
 // ── STORAGE ──
@@ -1925,7 +1926,7 @@ function buildAllTabs(p,c1,c2){
   html("tc-scores",`<p style="font-size:13px;color:var(--t2);margin-bottom:14px">Top 5 most probable correct scores.</p><div class="scores-list">${sc.map((s,i)=>`
     <div class="score-row${i===0?" top":""}">
       <span class="s-rank">${i+1}</span><span class="s-val">${s.score}</span>
-      <div style="flex:1">${confBar(Math.min(s.probability*3.5,100),i===0?GREEN:GRAY)}</div>
+      <div style="flex:1">${confBarNoLabel(Math.min(s.probability*3.5,100),i===0?GREEN:GRAY)}</div>
       <span class="s-pct">${s.probability}%</span><span class="s-odds">${s.odds}</span>
     </div>`).join("")}</div>`);
 
@@ -1935,7 +1936,7 @@ function buildAllTabs(p,c1,c2){
     const gc=g.team===p.team1?c1:c2;
     return`<div class="sc-card">
       <div class="sc-icon" style="background:${gc}18;color:${gc}"><i class="ti ti-run"></i></div>
-      <div style="flex:1"><div class="sc-name">${g.player}</div><div class="sc-meta">${g.team} · ${g.role}</div>${confBar(g.probability,gc)}</div>
+      <div style="flex:1"><div class="sc-name">${g.player}</div><div class="sc-meta">${g.team} · ${g.role}</div>${confBarNoLabel(g.probability,gc)}</div>
       <div class="sc-right"><div class="sc-odds" style="color:${gc};background:${gc}18">${g.odds}</div><div class="sc-prob">${g.probability}% likely</div></div>
     </div>`;
   }).join("")}</div>`);

@@ -768,6 +768,7 @@ select option{background:var(--card2)}
       <div class="m-meta">
         <div class="m-comp" id="r-comp"></div>
         <div><span id="tier-badge"></span></div>
+        <div><span id="richness-badge"></span></div>
         <div class="m-venue" id="r-venue"></div>
       </div>
       <div class="teams-row">
@@ -1353,6 +1354,36 @@ function toggleLineupStatus(){
   toast(curPred._lineupStatus==="confirmed"?"Marked as Confirmed ✓ — you know the real lineup":"Marked as Predicted ~");
 }
 
+
+// ── DETECT DATA RICHNESS from Phase 1 intel — independent of competition tier ──
+function detectDataRichness(intelText){
+  const t=(intelText||"").toLowerCase();
+  if(t.includes("data: rich")||t.includes("rich ✓"))return"rich";
+  if(t.includes("data: minimal")||t.includes("minimal ✗"))return"minimal";
+  if(t.includes("data: limited")||t.includes("limited ~"))return"limited";
+  // Fallback: scan for explicit data-poverty signals
+  const poverty=["no head to head","no previous meeting","first ever meeting","first meeting between",
+    "could not find","no recent data","limited information","no data available","unable to find",
+    "no record of","insufficient data","unknown player","no statistics available","no clear data",
+    "sparse data","little information"];
+  const hits=poverty.filter(s=>t.includes(s)).length;
+  if(hits>=2)return"minimal";
+  if(hits>=1)return"limited";
+  return"rich";
+}
+function richnessLabel(r){
+  return r==="rich"?"Full Data Coverage":r==="limited"?"Limited Data — Caution":"Minimal Data — High Caution";
+}
+function richnessColor(r){
+  return r==="rich"?"var(--em)":r==="limited"?"var(--amr)":"var(--ruby)";
+}
+function richnessBg(r){
+  return r==="rich"?"var(--em-g)":r==="limited"?"var(--amr-g)":"var(--ruby-g)";
+}
+function richnessBorder(r){
+  return r==="rich"?"var(--em-b)":r==="limited"?"var(--amr-b)":"rgba(255,77,106,0.22)";
+}
+
 let _curCacheKey=""; // track so Refresh button can clear it
 async function doAnalyze(forceRefresh=false){
   const t1=$("t1").value.trim(),t2=$("t2").value.trim(),comp=$("comp").value;
@@ -1413,9 +1444,10 @@ async function doAnalyze(forceRefresh=false){
 
     clearInterval(stepTmr);renderSteps(STEPS_P1.length,1);
 
-    // Detect lineup status and store for display
+    // Detect lineup status and data richness for display + calibration
     const lineupStatus=detectLineupStatus(intel);
-    console.log("Lineup status detected:", lineupStatus);
+    const dataRichness=detectDataRichness(intel);
+    console.log("Lineup status:", lineupStatus, "| Data richness:", dataRichness);
 
     // Extract referee name from Phase 1 output for lookup
     const refName = extractRefereeName(intel);
@@ -1427,7 +1459,8 @@ async function doAnalyze(forceRefresh=false){
     startStepTimer(2);
 
     const _tier=getCompTier(comp);
-    const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,_tier);
+    const _richness=detectDataRichness(intel);
+    const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,_tier,_richness);
     let rawAnalysis;
     try{
       rawAnalysis = await callAI(analysisPrompt, 8192, false, ANALYST_SYSTEM);
@@ -1466,6 +1499,7 @@ async function doAnalyze(forceRefresh=false){
     p._movement = lineMovement;
     p._lineupStatus = lineupStatus;
     p._tier = _tier;
+    p._dataRichness = dataRichness;
     curPred = p;
 
     _curCacheKey=cacheKey;
@@ -1597,6 +1631,13 @@ Search aggressively for confirmed starting XIs. Try multiple angles: "starting X
 
 At the top of your response always write: "LINEUPS: [CONFIRMED ✓ / PREDICTED ~]" and state which scenario applies and why (one sentence).
 
+DATA RICHNESS — SECOND CRITICAL ASSESSMENT:
+After your searches, honestly assess how much real, specific data you actually found for THIS exact matchup — regardless of how prestigious the competition is. A famous competition does not guarantee rich coverage for every individual fixture (a newly-promoted team, a continental debutant nation, or two sides with no shared history can all be data-poor even in a major competition).
+→ RICH: You found real recent results with scores for both teams, real player names for likely/confirmed lineups, and at least some head-to-head history or clear context.
+→ LIMITED: You found some real information but key gaps exist — e.g. no head-to-head record, vague or generic team news, or only partial squad information.
+→ MINIMAL: You found very little — no head-to-head, no specific recent form, generic or unknown player information, or search results returning mostly speculation.
+Always write: "DATA: [RICH ✓ / LIMITED ~ / MINIMAL ✗]" with a one-sentence reason.
+
 RUN 3 TARGETED WEB SEARCHES:
 
 Search 1 → "${t1} ${t2} confirmed lineup starting XI today"
@@ -1674,14 +1715,20 @@ self-calibrate to real-world accuracy over time.
 `;
 }
 
-function buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,tier){
+function buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,tier,richness){
   return`You are a world-class football betting analyst with expertise in statistical modelling and market efficiency.
 
 Here is the pre-match intelligence gathered for ${t1} vs ${t2} (${comp}):
 
 === DATA TIER: ${tier===1?"TIER 1":tier===2?"TIER 2":"TIER 3"} ===
-${tier===1?"This is a top-5 European league. Real xG and referee statistics are injected below — treat them as ground truth and apply full analytical confidence.":tier===2?"This is a major international/cup competition (World Cup, Continental Championship, Champions League, etc). No real xG/referee database exists for this competition — all stats below come from AI web research only. Cap confidence values at 65% maximum. Apply extra skepticism to edge calculations since true probabilities are estimated, not data-derived.":"This is a lower-tier competition with minimal statistical coverage. Treat all estimates with elevated caution. Cap confidence values at 55% maximum. Only flag a market as value if edge exceeds 15% (not the usual 5%) since estimate uncertainty is high."}
+${tier===1?"This is a top-5 European league. Real xG and referee statistics are injected below — treat them as ground truth.":tier===2?"This is a major international/cup competition. No real xG/referee database exists — all stats come from AI web research only.":"This is a lower-tier competition with minimal statistical coverage."}
 === END DATA TIER ===
+
+=== DATA RICHNESS FOR THIS SPECIFIC MATCH: ${richness==="rich"?"RICH":richness==="limited"?"LIMITED":"MINIMAL"} ===
+${richness==="rich"?"Real data was found for both teams in this specific matchup — apply the tier's normal confidence ceiling.":richness==="limited"?"Some data gaps exist for this specific matchup (e.g. no head-to-head, vague team news) even though the competition itself is reputable. Reduce your confidence ceiling by 10 percentage points below what the tier alone would suggest, and raise your edge threshold for flagging value by 3 percentage points.":"Very little real data was found for this specific matchup despite the competition tier — likely an unfamiliar fixture, debutant team, or sparse coverage. Cap confidence values at 50% maximum REGARDLESS of competition tier. Only flag a market as value if edge exceeds 18%. State explicitly in your Analyst Note that data for this specific match was limited."}
+=== END DATA RICHNESS ===
+
+COMBINED CALIBRATION RULE: Apply whichever cap is LOWER between the tier-based cap and the richness-based cap above. Tier tells you about the competition in general; richness tells you about THIS match specifically — always defer to the more cautious of the two.
 
 === INTELLIGENCE REPORT ===
 ${intel}
@@ -1819,6 +1866,14 @@ function renderResults(p,fromCache){
   const _tier=getCompTier(p.competition);
   const _tEl=$("tier-badge");
   if(_tEl){_tEl.innerHTML=`<i class="ti ti-shield-check" style="font-size:10px"></i> ${tierLabel(_tier)}`;_tEl.style.cssText=`background:${tierBg(_tier)};color:${tierColor(_tier)};border:1px solid ${tierBorder(_tier)};font-size:9px;font-weight:800;padding:3px 9px;border-radius:5px;letter-spacing:.05em;display:inline-flex;align-items:center;gap:4px;margin-top:4px`;}
+  const _rich=p._dataRichness;
+  const _rEl=$("richness-badge");
+  if(_rEl){
+    if(_rich&&_rich!=="rich"){
+      _rEl.innerHTML=`<i class="ti ti-alert-triangle" style="font-size:10px"></i> ${richnessLabel(_rich)}`;
+      _rEl.style.cssText=`background:${richnessBg(_rich)};color:${richnessColor(_rich)};border:1px solid ${richnessBorder(_rich)};font-size:9px;font-weight:800;padding:3px 9px;border-radius:5px;letter-spacing:.05em;display:inline-flex;align-items:center;gap:4px;margin-top:4px`;
+    }else{_rEl.innerHTML="";_rEl.style.display="none";}
+  }
   html("r-venue",p.venue&&p.venue!=="TBD"?`<i class="ti ti-map-pin" style="font-size:11px;margin-right:3px"></i>${p.venue}${fromCache?` <span class="cache-tag"><i class="ti ti-clock" style="font-size:10px"></i> Cached</span>`:""}`:"");
 
   const a1=$("av1");a1.textContent=inits(p.team1);a1.style.background=c1;

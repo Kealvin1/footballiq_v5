@@ -689,7 +689,7 @@ select option{background:var(--card2)}
 <!-- HEADER -->
 <div class="hdr">
   <div class="hdr-inner">
-    <div class="logo">
+    <div class="logo" onclick="goHome()" style="cursor:pointer" role="button" aria-label="Go to home screen">
       <div class="logo-icon"><i class="ti ti-ball-football"></i></div>
       <div class="logo-text">FOOTBALL<span>IQ</span></div>
     </div>
@@ -1307,6 +1307,15 @@ function quickSaveVB(idx){
     confidence:vb.confidence!=null?vb.confidence:null,status:"pending"});
   setLS(LS.HIST,hist);
   toast(`Tracking: ${vb.pick||"bet"} ✓`);
+}
+
+
+// ── HOME: logo click always returns to the main start screen ──────────
+function goHome(){
+  showPage("predict");
+  // If currently viewing analysis results, return to the input form
+  hide("results-section");hide("loading-section");hide("error-section");
+  show("form-section");
 }
 
 let _curCacheKey=""; // track so Refresh button can clear it

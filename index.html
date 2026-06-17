@@ -2278,14 +2278,38 @@ function updateAccaBadge(){const b=$("acca-badge");if(acca.length>0){b.textConte
 async function fetchFixtures(){
   const comp=$("fix-comp").value,when=$("fix-when").value;
   $("fix-btn").disabled=true;show("fix-loading");txt("fix-ld-sub",`${comp} · ${when}`);html("fix-results","");
-  try{
-    const today=new Date().toISOString().split("T")[0];
-    const raw=await callAI(`Search for upcoming ${comp} football fixtures scheduled for ${when} (around ${today}).
-Return ONLY valid JSON (no markdown):
+  const today=new Date().toISOString().split("T")[0];
+  const prompt=`Search for upcoming ${comp} football fixtures scheduled for ${when} (around ${today}).
+Return ONLY valid JSON (no markdown, no code fences, no trailing commas):
 {"competition":"${comp}","date":"${when}","fixtures":[{"home":"Team A","away":"Team B","time":"20:00","venue":"Stadium","round":"Round 1"}]}
-Include all real fixtures found. Return empty array if none. Do not invent matches.`,1200);
-    renderFixtures(parseJSON(raw));
-  }catch(e){html("fix-results",`<div class="err-box"><p>${e.message||"Failed to load fixtures"}</p></div>`)}
+List at most the 15 most relevant real fixtures found, ordered by date. Return empty array if none. Do not invent matches.`;
+  try{
+    let raw;
+    try{
+      raw=await callAI(prompt,3000);
+    }catch(e1){
+      if(e1.message==="__TRUNCATED__"){
+        // Retry once with an even tighter instruction
+        raw=await callAI(prompt+"\n\nIMPORTANT: Limit to the 8 most relevant fixtures only, keep the JSON compact.",3000);
+      }else{throw e1}
+    }
+    let parsed;
+    try{
+      parsed=parseJSON(raw);
+    }catch(e2){
+      if(e2.message==="__MALFORMED__"){
+        const fixed=await callAI(`Fix this malformed JSON, return ONLY the corrected JSON with no other text:\n\n${raw.slice(0,4000)}`,2000,false,"","claude-haiku-4-5-20251001");
+        parsed=parseJSON(fixed);
+      }else{throw e2}
+    }
+    renderFixtures(parsed);
+  }catch(e){
+    const msg = e.message==="__TRUNCATED__" ? "Too many fixtures to list — try narrowing to a specific competition or shorter time range."
+      : e.message==="__MALFORMED__" ? "Could not read fixture data. Please try again."
+      : e.message==="No API key configured." ? "Add your Anthropic API key in ⚙ Settings first."
+      : e.message || "Failed to load fixtures. Please try again.";
+    html("fix-results",`<div class="err-box"><p><i class="ti ti-alert-circle"></i> ${msg}</p></div>`);
+  }
   finally{$("fix-btn").disabled=false;hide("fix-loading")}
 }
 

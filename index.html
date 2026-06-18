@@ -1243,19 +1243,19 @@ function refreshAnalysis(){
 
 // ── DETECT LINEUP STATUS from Phase 1 intel text ────────────────────
 function detectLineupStatus(intelText){
-  const t=(intelText||"").toLowerCase();
-  // Phase 1 is instructed to write "LINEUPS: [CONFIRMED ✓ / PREDICTED ~]"
-  if(t.includes("confirmed ✓")||t.includes("lineups: confirmed")||
-     t.includes("confirmed lineups")||t.includes("official starting")||
-     t.includes("confirmed xi")||t.includes("confirmed starting xi")||
-     t.includes("official xi")||t.includes("confirmed \u2713"))
-    return"confirmed";
-  if(t.includes("predicted ~")||t.includes("lineups: predicted")||
-     t.includes("predicted lineup")||t.includes("predicted xi")||
-     t.includes("predicted \u223c"))
-    return"predicted";
-  // Fallback: if we see 22 real player names it's likely confirmed
-  const namePattern=(intelText.match(/[A-Z][a-zé-]+ [A-Z][a-zé-]+/g)||[]).length;
+  const t=intelText||"";
+  // Flexible regex: tolerates "LINEUPS:", extra words, different casing
+  const m=t.match(/lineups?\s*[:\-]\s*(confirmed|predicted)/i);
+  if(m)return m[1].toLowerCase();
+  // Fallback: keyword scan
+  const tl=t.toLowerCase();
+  if(tl.includes("confirmed lineup")||tl.includes("official starting")||
+     tl.includes("confirmed xi")||tl.includes("confirmed starting xi")||
+     tl.includes("official xi"))return"confirmed";
+  if(tl.includes("predicted lineup")||tl.includes("predicted xi")||
+     tl.includes("expected lineup")||tl.includes("expected xi"))return"predicted";
+  // Final fallback: count real player names found
+  const namePattern=(t.match(/[A-Z][a-zé-]+ [A-Z][a-zé-]+/g)||[]).length;
   return namePattern>15?"confirmed":"predicted";
 }
 
@@ -1357,17 +1357,24 @@ function toggleLineupStatus(){
 
 // ── DETECT DATA RICHNESS from Phase 1 intel — independent of competition tier ──
 function detectDataRichness(intelText){
-  const t=(intelText||"").toLowerCase();
-  if(t.includes("data: rich")||t.includes("rich ✓"))return"rich";
-  if(t.includes("data: minimal")||t.includes("minimal ✗"))return"minimal";
-  if(t.includes("data: limited")||t.includes("limited ~"))return"limited";
-  // Fallback: scan for explicit data-poverty signals
-  const poverty=["no head to head","no previous meeting","first ever meeting","first meeting between",
+  const t=intelText||"";
+  // Flexible regex: tolerates "DATA:", "DATA RICHNESS:", extra words, different casing
+  const m=t.match(/data\s*(?:richness)?\s*[:\-]\s*(rich|limited|minimal)/i);
+  if(m)return m[1].toLowerCase();
+  // Fallback: broad poverty-signal phrase scan (case-insensitive)
+  const tl=t.toLowerCase();
+  const poverty=[
+    "no head to head","no previous meeting","first ever meeting","first meeting between",
+    "no prior meeting","never played each other","never met before","no history between",
     "could not find","no recent data","limited information","no data available","unable to find",
     "no record of","insufficient data","unknown player","no statistics available","no clear data",
-    "sparse data","little information"];
-  const hits=poverty.filter(s=>t.includes(s)).length;
-  if(hits>=2)return"minimal";
+    "sparse data","little information","minimal coverage","limited coverage","scarce data",
+    "world cup debut","tournament debut","making their debut","international debut",
+    "newly promoted","little known","relatively unknown","not well known",
+    "no comparable data","lack of data","data is limited","data is scarce","thin coverage"
+  ];
+  const hits=poverty.filter(s=>tl.includes(s)).length;
+  if(hits>=3)return"minimal";
   if(hits>=1)return"limited";
   return"rich";
 }
@@ -1623,31 +1630,33 @@ ${t1} vs ${t2} — ${comp}
 ${xgBlock}
 ${movBlock}
 
-LINEUP DETECTION — CRITICAL FIRST STEP:
-Search aggressively for confirmed starting XIs. Try multiple angles: "starting XI announced", "lineups out", "confirmed team news", official club/competition social posts, or live match-day coverage.
-
-→ CONFIRMED: You found specific named players with positions from any credible source (club account, major sports outlet, live match coverage, official competition feed) reporting the ACTUAL starting eleven for this specific match — not a general squad list or historical lineup. If the source presents these 11 names as the team that is playing (even if the source itself doesn't use the word "official"), treat this as CONFIRMED. Do not under-label real, specific, source-backed lineups as merely "predicted" out of excess caution.
-→ PREDICTED: You only found general squad news, injury reports, or explicit "predicted/expected lineup" speculation pieces with no specific source confirming these are the actual starting players for today's match.
-
-At the top of your response always write: "LINEUPS: [CONFIRMED ✓ / PREDICTED ~]" and state which scenario applies and why (one sentence).
-
-DATA RICHNESS — SECOND CRITICAL ASSESSMENT:
-After your searches, honestly assess how much real, specific data you actually found for THIS exact matchup — regardless of how prestigious the competition is. A famous competition does not guarantee rich coverage for every individual fixture (a newly-promoted team, a continental debutant nation, or two sides with no shared history can all be data-poor even in a major competition).
-→ RICH: You found real recent results with scores for both teams, real player names for likely/confirmed lineups, and at least some head-to-head history or clear context.
-→ LIMITED: You found some real information but key gaps exist — e.g. no head-to-head record, vague or generic team news, or only partial squad information.
-→ MINIMAL: You found very little — no head-to-head, no specific recent form, generic or unknown player information, or search results returning mostly speculation.
-Always write: "DATA: [RICH ✓ / LIMITED ~ / MINIMAL ✗]" with a one-sentence reason.
-
-RUN 3 TARGETED WEB SEARCHES:
+RUN 3 TARGETED WEB SEARCHES FIRST:
 
 Search 1 → "${t1} ${t2} confirmed lineup starting XI today"
-  Find: The actual starting eleven if announced for this match. Try a second search "${t1} vs ${t2} team news lineups out" if the first doesn't surface a clear answer.. Manager quotes about selections.
+  Find: The actual starting eleven if announced for this match. Try a second search "${t1} vs ${t2} team news lineups out" if the first doesn't surface a clear answer. Manager quotes about selections.
 
 Search 2 → "${t1} ${t2} head to head referee ${comp} 2025 2026"
   Find: H2H last 5 results with exact scores, assigned referee name and reputation, venue, competition standings and stakes.
 
 Search 3 → "${t1} ${t2} preview weather odds ${comp}"
   Find: Weather forecast at venue, competition context, current market odds, any line movement or sharp money signals.
+
+AFTER completing all 3 searches, before writing your full report, assess two things based on what you actually found:
+
+(1) LINEUP STATUS:
+→ CONFIRMED: You found specific named players with positions from any credible source reporting the ACTUAL starting eleven for this specific match. If a source presents these 11 names as the team that is playing — even without the word "official" — treat as CONFIRMED.
+→ PREDICTED: You only found general squad news, injury reports, or explicit "predicted/expected lineup" speculation with no source confirming the actual starting players.
+
+(2) DATA RICHNESS FOR THIS SPECIFIC MATCHUP (independent of how famous the competition is):
+→ RICH: Real recent results with scores for both teams, real player names, and some head-to-head history or clear context.
+→ LIMITED: Some real information found but key gaps exist — no head-to-head record, vague team news, or partial squad info.
+→ MINIMAL: Very little found — no head-to-head, no specific form, unknown/generic players, mostly speculation. This is common for tournament debutants, newly-promoted teams, or sides with no shared history regardless of competition prestige.
+
+MANDATORY OUTPUT FORMAT — write these as the very first two lines of your response, exactly in this format:
+LINEUPS: CONFIRMED ✓ (or PREDICTED ~) — one sentence why
+DATA: RICH ✓ (or LIMITED ~ or MINIMAL ✗) — one sentence why
+
+Then provide your full intelligence report below those two lines.
 
 Be specific — real player names, exact scores, real statistics only.`;
 }

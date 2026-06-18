@@ -1358,24 +1358,49 @@ function toggleLineupStatus(){
 // ── DETECT DATA RICHNESS from Phase 1 intel — independent of competition tier ──
 function detectDataRichness(intelText){
   const t=intelText||"";
-  // Flexible regex: tolerates "DATA:", "DATA RICHNESS:", extra words, different casing
+  // PRIMARY: flexible regex matching the mandatory DATA: tag
   const m=t.match(/data\s*(?:richness)?\s*[:\-]\s*(rich|limited|minimal)/i);
   if(m)return m[1].toLowerCase();
-  // Fallback: broad poverty-signal phrase scan (case-insensitive)
+  // SECONDARY: broad phrase scan across all 4 richness factors
   const tl=t.toLowerCase();
-  const poverty=[
-    "no head to head","no previous meeting","first ever meeting","first meeting between",
-    "no prior meeting","never played each other","never met before","no history between",
-    "could not find","no recent data","limited information","no data available","unable to find",
-    "no record of","insufficient data","unknown player","no statistics available","no clear data",
-    "sparse data","little information","minimal coverage","limited coverage","scarce data",
-    "world cup debut","tournament debut","making their debut","international debut",
-    "newly promoted","little known","relatively unknown","not well known",
-    "no comparable data","lack of data","data is limited","data is scarce","thin coverage"
+  const minimalSignals=[
+    // No head-to-head
+    "no previous meeting","no prior meeting","first ever meeting","first meeting between",
+    "never played each other","never met before","no history between","no head-to-head",
+    "no prior head","no recorded history","0 previous","zero previous",
+    // Squad quality (most players unknown/minor leagues)
+    "majority of players","most players unknown","largely obscure","unknown outside",
+    "minor league","lower league players","not recognised internationally",
+    "no internationally recognised","squad lacks","world cup debut","tournament debut",
+    "making their debut","international debut","first world cup","first ever world cup",
+    // Referee
+    "referee unknown","no referee data","no referee information","referee not found",
+    "no information on the referee","referee data unavailable",
+    // General
+    "no recent data","no data available","no statistics available","no comparable data",
+    "could not find","insufficient data","sparse data","scarce data","minimal coverage",
+    "no clear data","no record of"
   ];
-  const hits=poverty.filter(s=>tl.includes(s)).length;
-  if(hits>=3)return"minimal";
-  if(hits>=1)return"limited";
+  const limitedSignals=[
+    // Partial H2H
+    "limited head-to-head","only one previous","single previous meeting","one previous meeting",
+    "meetings are old","very old meeting","decade ago","no meaningful h2h",
+    // Partial squad knowledge
+    "some unknown players","mix of known","several unknown","many unknown",
+    "playing in lower","not well known","relatively unknown","little known",
+    "obscure players","limited international",
+    // Partial referee
+    "referee rarely","referee limited","limited referee data","referee is not widely",
+    "referee with few","unnamed referee",
+    // Partial form
+    "limited information","limited data","limited coverage","little information",
+    "vague team news","partial squad","only partial","few results",
+    "data is limited","data is scarce","thin coverage","lack of data"
+  ];
+  const minHits=minimalSignals.filter(s=>tl.includes(s)).length;
+  const limHits=limitedSignals.filter(s=>tl.includes(s)).length;
+  if(minHits>=1)return"minimal";
+  if(limHits>=1)return"limited";
   return"rich";
 }
 function richnessLabel(r){
@@ -1633,10 +1658,13 @@ ${movBlock}
 RUN 3 TARGETED WEB SEARCHES FIRST:
 
 Search 1 → "${t1} ${t2} confirmed lineup starting XI today"
-  Find: The actual starting eleven if announced for this match. Try a second search "${t1} vs ${t2} team news lineups out" if the first doesn't surface a clear answer. Manager quotes about selections.
+  Find: The actual starting eleven if officially released. If the first search is unclear, ALSO search "${t1} starting XI confirmed" and "${t2} lineup confirmed". Close to kickoff (within 90 minutes), lineups are almost always publicly available from club social accounts, major sports outlets (BBC, Sky Sports, ESPN, UEFA/FIFA official feeds) or live score apps. If you find specific named players in specific positions from ANY of these sources for THIS match, classify as CONFIRMED even if the source doesn't use the word "official".
 
-Search 2 → "${t1} ${t2} head to head referee ${comp} 2025 2026"
-  Find: H2H last 5 results with exact scores, assigned referee name and reputation, venue, competition standings and stakes.
+Search 2 → "${t1} ${t2} head to head history all meetings referee ${comp}"
+  Find: ALL previous meetings between these two teams with results. Named referee and their reputation/stats. Venue and competition context.
+
+Search 2b (if referee not found above) → "${t1} ${t2} referee 2026 World Cup appointed"
+  Find: Who is refereeing this specific match and their known tendencies.
 
 Search 3 → "${t1} ${t2} preview weather odds ${comp}"
   Find: Weather forecast at venue, competition context, current market odds, any line movement or sharp money signals.
@@ -1647,10 +1675,33 @@ AFTER completing all 3 searches, before writing your full report, assess two thi
 → CONFIRMED: You found specific named players with positions from any credible source reporting the ACTUAL starting eleven for this specific match. If a source presents these 11 names as the team that is playing — even without the word "official" — treat as CONFIRMED.
 → PREDICTED: You only found general squad news, injury reports, or explicit "predicted/expected lineup" speculation with no source confirming the actual starting players.
 
-(2) DATA RICHNESS FOR THIS SPECIFIC MATCHUP (independent of how famous the competition is):
-→ RICH: Real recent results with scores for both teams, real player names, and some head-to-head history or clear context.
-→ LIMITED: Some real information found but key gaps exist — no head-to-head record, vague team news, or partial squad info.
-→ MINIMAL: Very little found — no head-to-head, no specific form, unknown/generic players, mostly speculation. This is common for tournament debutants, newly-promoted teams, or sides with no shared history regardless of competition prestige.
+(2) DATA RICHNESS FOR THIS SPECIFIC MATCHUP — assess ALL four factors independently:
+
+FACTOR A — SQUAD QUALITY:
+Ask: are the majority of players in each squad well-known professionals playing in major recognised leagues (eg. top European leagues, South American first divisions, MLS, established Asian leagues)? Or are they largely obscure, playing in minor domestic leagues, or unknown outside their home nation?
+→ RICH: Most players are recognisable professionals in established leagues
+→ LIMITED: Mix — some known, many obscure or unknown
+→ MINIMAL: Majority of players are obscure or unknown outside their home nation, squad lacks internationally recognised names
+
+FACTOR B — HEAD-TO-HEAD HISTORY:
+→ RICH: At least 2 previous meetings with results found
+→ LIMITED: Only 1 previous meeting, or meetings are very old (10+ years ago)
+→ MINIMAL: No previous meetings found between these specific teams (first ever fixture, or no recorded history)
+
+FACTOR C — REFEREE DATA:
+→ RICH: Named referee found with cards/game stats, known reputation
+→ LIMITED: Referee named but no meaningful stats found, or referee is rarely covered internationally
+→ MINIMAL: No referee information available, or referee is entirely unknown
+
+FACTOR D — RECENT FORM DATA:
+→ RICH: At least 4 recent results with scores found for both teams
+→ LIMITED: Only 1-2 results found, or results are from very different competition levels
+→ MINIMAL: No real recent results found for one or both teams
+
+OVERALL DATA RICHNESS VERDICT (apply the most cautious individual factor):
+→ RICH ✓: ALL four factors are RICH
+→ LIMITED ~: ANY factor is LIMITED (even if others are rich)
+→ MINIMAL ✗: ANY factor is MINIMAL (even if the competition is prestigious)
 
 MANDATORY OUTPUT FORMAT — write these as the very first two lines of your response, exactly in this format:
 LINEUPS: CONFIRMED ✓ (or PREDICTED ~) — one sentence why

@@ -947,6 +947,118 @@ const LS={HIST:"fiq3_history",SET:"fiq3_settings",ACCA:"fiq3_acca",DARK:"fiq3_da
 // ── PHASE 2 SYSTEM PROMPT — establishes expert persona at highest priority ──
 const ANALYST_SYSTEM=`You are a world-class football analyst and sports betting specialist with deep expertise in statistical modelling, tactical analysis, and market efficiency. You reason step by step before committing to any prediction. You are precise with probabilities, intellectually honest about uncertainty, and never fabricate statistics or player data. When data is incomplete or unavailable, you clearly flag this. Your confidence estimates are deliberately calibrated — you do not round to neat numbers, and you adjust for known biases in your historical output.`;
 
+// ── PHASE 2 STATIC CACHEABLE BLOCK — methodology + JSON schema, identical
+// on every call. Sent with cache_control so repeated Phase 2 calls within
+// the cache window cost ~90% less on this ~2300-token block (Sonnet 4.6).
+const PHASE2_STATIC_PROMPT=`You are a world-class football betting analyst with expertise in statistical modelling and market efficiency.
+
+Now reason through this match step by step before producing your final output:
+
+STEP 1 — SQUAD: Phase 1 flagged lineups as CONFIRMED ✓ (use as facts) or PREDICTED ~ (factor uncertainty into confidence). Compare XIs and assess absences impact.
+STEP 2 — FORM & xG: Analyse HOME form and AWAY form SEPARATELY — this is critical. Many teams play very differently home vs away. Also: if actual goals scored/conceded deviates from xG by >0.3 per game over last 5 matches, explicitly model regression toward xG mean in your Over/Under and BTTS predictions. State the direction and magnitude of expected correction.
+STEP 3 — TACTICAL MATCHUP: How do their systems interact? Any structural mismatches to exploit?
+STEP 4 — CONTEXT & PSYCHOLOGY: What are the stakes? Any motivation imbalances? Home/away form split?
+STEP 5 — PHYSICAL FACTORS: How do weather, fatigue, and travel affect the game and specific markets?
+STEP 6 — REFEREE INFLUENCE: How does this referee's style affect cards, penalties and match tempo?
+STEP 7 — CORNERS ANALYSIS: Pressing intensity, set piece specialists, defensive shape → corner volume expected?
+STEP 8 — MARKET VALUE: For each key market, compute: implied_probability = 1/odds. Also analyse the 10 additionalMarkets — use xG data for goals markets, HT xG splits for First Half 1X2, referee stats for Penalty, team xGA for Clean Sheet. Compare to your estimated true_probability. Only mark value=true when edge = (true_prob - implied_prob) / implied_prob > 0.05 (5%+ edge). Show the calculation. This prevents false value flags.
+
+After reasoning, output ONLY a valid JSON object (NO markdown, NO code fences (no backticks), NO comments, NO trailing commas. Start your response with { and end with }. Precise confidence values like 63, 71, 58 — never multiples of 5. Keep "reasoning" under 12 words, "chainOfThought" under 80 words):
+{
+  "team1":"[Home Team]","team2":"[Away Team]","competition":"[Competition]","venue":"stadium or TBD",
+  "winProbabilities":{"team1":52,"draw":24,"team2":24},
+  "expectedGoals":{"team1":1.6,"team2":1.1},
+  "mainPrediction":{"market":"1X2","pick":"W1","odds":2.10,"confidence":68,"value":true},
+  "chainOfThought":"Concise 4-6 sentence summary of the reasoning chain above",
+  "predictions":[
+    {"market":"Both Teams to Score","pick":"Yes","odds":1.85,"confidence":63,"value":false,"reasoning":"specific evidence-based reason"},
+    {"market":"Over/Under 2.5 Goals","pick":"Under 2.5","odds":1.90,"confidence":67,"value":true,"reasoning":"specific reason"},
+    {"market":"Asian Handicap","pick":"[Home Team] -0.5","odds":2.05,"confidence":61,"value":false,"reasoning":"specific reason"},
+    {"market":"Double Chance","pick":"1X","odds":1.38,"confidence":74,"value":false,"reasoning":"specific reason"},
+    {"market":"Draw No Bet","pick":"[Home Team]","odds":1.65,"confidence":66,"value":false,"reasoning":"specific reason"},
+    {"market":"First Half — Over/Under 1.5","pick":"Under 1.5","odds":1.80,"confidence":59,"value":false,"reasoning":"specific reason"}
+  ],
+  "cornerMarkets":[
+    {"market":"Total Corners Over/Under 9.5","pick":"Over","odds":1.87,"confidence":65,"value":false,"reasoning":"specific corner analysis"},
+    {"market":"Total Corners Over/Under 10.5","pick":"Under","odds":1.95,"confidence":61,"value":false,"reasoning":"specific reason"},
+    {"market":"First Half Corners Over 4.5","pick":"Under","odds":1.88,"confidence":58,"value":false,"reasoning":"specific reason"},
+    {"market":"[Home or Away Team] Most Corners","pick":"[Home Team]","odds":1.95,"confidence":60,"value":false,"reasoning":"pressing style analysis"}
+  ],
+  "cardMarkets":[
+    {"market":"Total Cards Over/Under 3.5","pick":"Over","odds":1.88,"confidence":64,"value":true,"reasoning":"referee + rivalry analysis"},
+    {"market":"Total Cards Over/Under 4.5","pick":"Under","odds":1.95,"confidence":60,"value":false,"reasoning":"specific reason"},
+    {"market":"Player to be Carded","pick":"Real player name","odds":3.50,"confidence":42,"value":false,"reasoning":"tackling tendencies + referee style"}
+  ],
+  "htftMarkets":[
+    {"pick":"1/1","odds":2.80,"probability":36,"reasoning":"most likely scenario given form"},
+    {"pick":"X/1","odds":4.50,"probability":20,"reasoning":"slow starter pattern"},
+    {"pick":"X/X","odds":4.00,"probability":22,"reasoning":"two defensive sides"},
+    {"pick":"1/X","odds":6.00,"probability":12,"reasoning":"home side fades"},
+    {"pick":"2/2","odds":5.50,"probability":10,"reasoning":"away team form"}
+  ],
+  "oddsComparison":[
+    {"bookmaker":"Bet365","w1":2.05,"draw":3.55,"w2":3.25,"over25":1.90,"under25":1.90,"bttsY":1.83,"bttsN":1.92},
+    {"bookmaker":"William Hill","w1":2.00,"draw":3.50,"w2":3.30,"over25":1.88,"under25":1.92,"bttsY":1.78,"bttsN":1.97},
+    {"bookmaker":"Betway","w1":2.15,"draw":3.65,"w2":3.15,"over25":1.95,"under25":1.86,"bttsY":1.82,"bttsN":1.93}
+  ],
+  "intelligence":{
+    "team1Lineup":["GK: Name","RB: Name","CB: Name","CB: Name","LB: Name","CM: Name","CM: Name","CM: Name","RW: Name","ST: Name","LW: Name"],
+    "team2Lineup":["GK: Name","RB: Name","CB: Name","CB: Name","LB: Name","CM: Name","CM: Name","CM: Name","RW: Name","ST: Name","LW: Name"],
+    "team1Formation":"4-3-3",
+    "team2Formation":"4-2-3-1",
+    "weather":{"condition":"Clear","temperature":"18°C","wind":"12 km/h","humidity":"60%","impact":"Minimal — good playing conditions"},
+    "referee":{"name":"Referee Name","nationality":"Country","avgCardsPerGame":4.2,"avgYellowPerGame":3.9,"avgRedPerGame":0.15,"penaltyRate":"12% of games","homeBias":"Neutral","impactNote":"Strict — expect bookings"},
+    "xGData":{"team1AvgXGFor":1.82,"team1AvgXGAgainst":1.12,"team2AvgXGFor":1.35,"team2AvgXGAgainst":1.45,"xGNote":"Team1 overperforms xG slightly"},
+    "travelFatigue":{"team1LastMatch":"3 days ago, home","team2LastMatch":"4 days ago, away","fatigueImpact":"Slight edge to Team1"},
+    "oddsMovement":"Market opened [Home Team] at 2.40, now 2.10 — significant smart money on home win"
+  },
+  "correctScorePredictions":[
+    {"score":"1-0","probability":18,"odds":5.5},
+    {"score":"1-1","probability":12,"odds":6.5},
+    {"score":"2-0","probability":11,"odds":7.0}
+  ],
+  "goalscorers":[
+    {"player":"Real player name","team":"[Home Team]","odds":2.5,"probability":42,"role":"Striker"},
+    {"player":"Real player name","team":"[Away Team]","odds":3.5,"probability":29,"role":"Striker"},
+    {"player":"Real player name","team":"[Away Team]","odds":4.0,"probability":25,"role":"Midfielder"}
+  ],
+  "keyFactors":["Evidence-based factor 1","Factor 2","Factor 3","Factor 4","Factor 5"],
+  "injuries":[
+    {"player":"Name","team":"[Home Team]","status":"Out","impact":"High"},
+    {"player":"Name","team":"[Away Team]","status":"Doubtful","impact":"Medium"}
+  ],
+  "form":{
+    "team1":{
+      "overall":["W","W","D","L","W"],"home":["W","W","W"],"away":["D","L","W"],
+      "goalsFor":9,"goalsAgainst":4,"homeGoalsFor":6,"homeGoalsAgainst":2,"awayGoalsFor":3,"awayGoalsAgainst":2
+    },
+    "team2":{
+      "overall":["L","D","W","W","L"],"home":["W","W"],"away":["L","D","L"],
+      "goalsFor":6,"goalsAgainst":7,"homeGoalsFor":4,"homeGoalsAgainst":2,"awayGoalsFor":2,"awayGoalsAgainst":5
+    }
+  },
+  "headToHead":{"team1Wins":5,"draws":3,"team2Wins":2,"lastMeeting":"2-1 [Home Team] (2024)","avgGoals":2.6,"totalMeetings":10},
+  "valueBets":[{"market":"Over/Under 2.5 Goals","pick":"Under 2.5","odds":1.90,"trueOdds":1.62,"edge":17,"reasoning":"specific evidence"}],
+  "additionalMarkets":[
+    {"market":"First Half 1X2","pick":"Home Win HT","odds":2.50,"confidence":52,"value":false,"reasoning":"concise reason"},
+    {"market":"Over/Under 1.5 Goals","pick":"Over 1.5","odds":1.40,"confidence":74,"value":false,"reasoning":"concise reason"},
+    {"market":"Over/Under 3.5 Goals","pick":"Under 3.5","odds":1.55,"confidence":68,"value":false,"reasoning":"concise reason"},
+    {"market":"Clean Sheet - [Home Team]","pick":"Yes","odds":2.20,"confidence":41,"value":false,"reasoning":"concise reason"},
+    {"market":"Clean Sheet - [Away Team]","pick":"No","odds":1.45,"confidence":63,"value":false,"reasoning":"concise reason"},
+    {"market":"Win to Nil - [Home Team]","pick":"Yes","odds":3.50,"confidence":31,"value":false,"reasoning":"concise reason"},
+    {"market":"Score Draw","pick":"Yes","odds":3.80,"confidence":28,"value":false,"reasoning":"concise reason"},
+    {"market":"European Handicap -1","pick":"[Home Team]","odds":3.20,"confidence":38,"value":false,"reasoning":"concise reason"},
+    {"market":"BTTS + Over 2.5","pick":"Yes","odds":2.10,"confidence":44,"value":false,"reasoning":"concise reason"},
+    {"market":"Penalty to be Awarded","pick":"Yes","odds":2.40,"confidence":39,"value":false,"reasoning":"referee-based reason"}
+  ],
+  "riskLevel":"Medium",
+  "analystNote":"2-3 sentence expert summary of this prediction backed by the intelligence gathered.",
+  "lineupStatus":"CONFIRMED",
+  "dataQuality":"High",
+  "disclaimer":"For informational purposes only. Please gamble responsibly. 18+ only."
+}`;
+
+
 const CACHE_TTL=3*60*60*1000; // 3 hours
 
 const STEPS_P0=[
@@ -1151,7 +1263,7 @@ function parseJSON(raw){
 // ── NETLIFY FUNCTION CALLS ─────────────────────────────────────────
 async function fetchXGData(team, comp){
   try{
-    const r=await fetch(`/api/xg?team=${encodeURIComponent(team)}&competition=${encodeURIComponent(comp)}`);
+    const r=await fetch(`/.netlify/functions/xg?team=${encodeURIComponent(team)}&competition=${encodeURIComponent(comp)}`);
     if(!r.ok)return null;
     const d=await r.json();
     return d.success?d.data:null;
@@ -1161,7 +1273,7 @@ async function fetchXGData(team, comp){
 async function fetchRefereeStats(name, comp){
   if(!name||name.length<4)return null;
   try{
-    const r=await fetch(`/api/referee?name=${encodeURIComponent(name)}&competition=${encodeURIComponent(comp)}`);
+    const r=await fetch(`/.netlify/functions/referee?name=${encodeURIComponent(name)}&competition=${encodeURIComponent(comp)}`);
     if(!r.ok)return null;
     const d=await r.json();
     return d.success?d.data:null;
@@ -1170,7 +1282,7 @@ async function fetchRefereeStats(name, comp){
 
 async function fetchLiveOddsProxy(comp){
   try{
-    const r=await fetch(`/api/odds?competition=${encodeURIComponent(comp)}`);
+    const r=await fetch(`/.netlify/functions/odds?competition=${encodeURIComponent(comp)}`);
     if(!r.ok)return null;
     const d=await r.json();
     return d.success?{games:d.games,movement:d.movement}:null;
@@ -1508,18 +1620,23 @@ async function doAnalyze(forceRefresh=false){
     const _tier=getCompTier(comp);
     const _richness=detectDataRichness(intel);
     const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,_tier,_richness);
+    // Static methodology+schema block is identical on every Phase 2 call —
+    // marking it cacheable saves ~90% on this ~2300-token block for any
+    // repeat call within the cache window (e.g. retries, or scouting
+    // several matches back-to-back in one session).
+    const _staticBlock={type:"text",text:PHASE2_STATIC_PROMPT,cache_control:{type:"ephemeral"}};
     let rawAnalysis;
     try{
-      rawAnalysis = await callAI(analysisPrompt, 8192, false, ANALYST_SYSTEM);
+      rawAnalysis = await callAI([_staticBlock,{type:"text",text:analysisPrompt}], 8192, false, ANALYST_SYSTEM);
     }catch(e){
       if(e.message==="__TRUNCATED__"){
         // Response was cut off — retry asking for more compact output
         toast("Optimising response length — retrying...", 3000);
-        const retryPrompt = analysisPrompt +
+        const retryDynamic = analysisPrompt +
           "\n\nCRITICAL: Previous attempt was too long and got cut off. "+
           "Be extremely concise. Limit reasoning fields to 8 words max. "+
           "Skip oddsComparison array entirely (use []). Output valid complete JSON under 6000 tokens.";
-        rawAnalysis = await callAI(retryPrompt, 8192, false, ANALYST_SYSTEM);
+        rawAnalysis = await callAI([_staticBlock,{type:"text",text:retryDynamic}], 8192, false, ANALYST_SYSTEM);
       } else { throw e; }
     }
 
@@ -1812,9 +1929,11 @@ self-calibrate to real-world accuracy over time.
 }
 
 function buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,tier,richness){
-  return`You are a world-class football betting analyst with expertise in statistical modelling and market efficiency.
-
-Here is the pre-match intelligence gathered for ${t1} vs ${t2} (${comp}):
+  // NOTE: this now returns only the DYNAMIC, per-match portion of the
+  // Phase 2 prompt. The static methodology + JSON schema (PHASE2_STATIC_PROMPT)
+  // is sent as a separate, cached content block — see callAI's array-content
+  // support and the doAnalyze call site for how the two are combined.
+  return`Here is the pre-match intelligence gathered for ${t1} vs ${t2} (${comp}):
 
 === DATA TIER: ${tier===1?"TIER 1":tier===2?"TIER 2":"TIER 3"} ===
 ${tier===1?"This is a top-5 European league. Real xG and referee statistics are injected below — treat them as ground truth.":tier===2?"This is a major international/cup competition. No real xG/referee database exists — all stats come from AI web research only.":"This is a lower-tier competition with minimal statistical coverage."}
@@ -1846,111 +1965,8 @@ Regression signals: ${t1} ${xg1.regression} | ${t2} ${xg2.regression}
 === END xG INSIGHT ===`:""}
 
 ${getCalibrationMemo()}
-Now reason through this match step by step before producing your final output:
 
-STEP 1 — SQUAD: Phase 1 flagged lineups as CONFIRMED ✓ (use as facts) or PREDICTED ~ (factor uncertainty into confidence). Compare XIs and assess absences impact.
-STEP 2 — FORM & xG: Analyse HOME form and AWAY form SEPARATELY — this is critical. Many teams play very differently home vs away. Also: if actual goals scored/conceded deviates from xG by >0.3 per game over last 5 matches, explicitly model regression toward xG mean in your Over/Under and BTTS predictions. State the direction and magnitude of expected correction.
-STEP 3 — TACTICAL MATCHUP: How do their systems interact? Any structural mismatches to exploit?
-STEP 4 — CONTEXT & PSYCHOLOGY: What are the stakes? Any motivation imbalances? Home/away form split?
-STEP 5 — PHYSICAL FACTORS: How do weather, fatigue, and travel affect the game and specific markets?
-STEP 6 — REFEREE INFLUENCE: How does this referee's style affect cards, penalties and match tempo?
-STEP 7 — CORNERS ANALYSIS: Pressing intensity, set piece specialists, defensive shape → corner volume expected?
-STEP 8 — MARKET VALUE: For each key market, compute: implied_probability = 1/odds. Also analyse the 10 additionalMarkets — use xG data for goals markets, HT xG splits for First Half 1X2, referee stats for Penalty, team xGA for Clean Sheet. Compare to your estimated true_probability. Only mark value=true when edge = (true_prob - implied_prob) / implied_prob > 0.05 (5%+ edge). Show the calculation. This prevents false value flags.
-
-After reasoning, output ONLY a valid JSON object (NO markdown, NO code fences (no backticks), NO comments, NO trailing commas. Start your response with { and end with }. Precise confidence values like 63, 71, 58 — never multiples of 5. Keep "reasoning" under 12 words, "chainOfThought" under 80 words):
-{
-  "team1":"${t1}","team2":"${t2}","competition":"${comp}","venue":"stadium or TBD",
-  "winProbabilities":{"team1":52,"draw":24,"team2":24},
-  "expectedGoals":{"team1":1.6,"team2":1.1},
-  "mainPrediction":{"market":"1X2","pick":"W1","odds":2.10,"confidence":68,"value":true},
-  "chainOfThought":"Concise 4-6 sentence summary of the reasoning chain above",
-  "predictions":[
-    {"market":"Both Teams to Score","pick":"Yes","odds":1.85,"confidence":63,"value":false,"reasoning":"specific evidence-based reason"},
-    {"market":"Over/Under 2.5 Goals","pick":"Under 2.5","odds":1.90,"confidence":67,"value":true,"reasoning":"specific reason"},
-    {"market":"Asian Handicap","pick":"${t1} -0.5","odds":2.05,"confidence":61,"value":false,"reasoning":"specific reason"},
-    {"market":"Double Chance","pick":"1X","odds":1.38,"confidence":74,"value":false,"reasoning":"specific reason"},
-    {"market":"Draw No Bet","pick":"${t1}","odds":1.65,"confidence":66,"value":false,"reasoning":"specific reason"},
-    {"market":"First Half — Over/Under 1.5","pick":"Under 1.5","odds":1.80,"confidence":59,"value":false,"reasoning":"specific reason"}
-  ],
-  "cornerMarkets":[
-    {"market":"Total Corners Over/Under 9.5","pick":"Over","odds":1.87,"confidence":65,"value":false,"reasoning":"specific corner analysis"},
-    {"market":"Total Corners Over/Under 10.5","pick":"Under","odds":1.95,"confidence":61,"value":false,"reasoning":"specific reason"},
-    {"market":"First Half Corners Over 4.5","pick":"Under","odds":1.88,"confidence":58,"value":false,"reasoning":"specific reason"},
-    {"market":"${t1} Most Corners","pick":"${t1}","odds":1.95,"confidence":60,"value":false,"reasoning":"pressing style analysis"}
-  ],
-  "cardMarkets":[
-    {"market":"Total Cards Over/Under 3.5","pick":"Over","odds":1.88,"confidence":64,"value":true,"reasoning":"referee + rivalry analysis"},
-    {"market":"Total Cards Over/Under 4.5","pick":"Under","odds":1.95,"confidence":60,"value":false,"reasoning":"specific reason"},
-    {"market":"${t1} Player to be Carded","pick":"Real player name","odds":3.50,"confidence":42,"value":false,"reasoning":"tackling tendencies + referee style"}
-  ],
-  "htftMarkets":[
-    {"pick":"1/1","odds":2.80,"probability":36,"reasoning":"most likely scenario given form"},
-    {"pick":"X/1","odds":4.50,"probability":20,"reasoning":"slow starter pattern"},
-    {"pick":"X/X","odds":4.00,"probability":22,"reasoning":"two defensive sides"},
-    {"pick":"1/X","odds":6.00,"probability":12,"reasoning":"home side fades"},
-    {"pick":"2/2","odds":5.50,"probability":10,"reasoning":"away team form"}
-  ],
-  "oddsComparison":[
-    {"bookmaker":"Bet365","w1":2.05,"draw":3.55,"w2":3.25,"over25":1.90,"under25":1.90,"bttsY":1.83,"bttsN":1.92},
-    {"bookmaker":"William Hill","w1":2.00,"draw":3.50,"w2":3.30,"over25":1.88,"under25":1.92,"bttsY":1.78,"bttsN":1.97},
-    {"bookmaker":"Betway","w1":2.15,"draw":3.65,"w2":3.15,"over25":1.95,"under25":1.86,"bttsY":1.82,"bttsN":1.93}
-  ],
-  "intelligence":{
-    "team1Lineup":["GK: Name","RB: Name","CB: Name","CB: Name","LB: Name","CM: Name","CM: Name","CM: Name","RW: Name","ST: Name","LW: Name"],
-    "team2Lineup":["GK: Name","RB: Name","CB: Name","CB: Name","LB: Name","CM: Name","CM: Name","CM: Name","RW: Name","ST: Name","LW: Name"],
-    "team1Formation":"4-3-3",
-    "team2Formation":"4-2-3-1",
-    "weather":{"condition":"Clear","temperature":"18°C","wind":"12 km/h","humidity":"60%","impact":"Minimal — good playing conditions"},
-    "referee":{"name":"Referee Name","nationality":"Country","avgCardsPerGame":4.2,"avgYellowPerGame":3.9,"avgRedPerGame":0.15,"penaltyRate":"12% of games","homeBias":"Neutral","impactNote":"Strict — expect bookings"},
-    "xGData":{"team1AvgXGFor":1.82,"team1AvgXGAgainst":1.12,"team2AvgXGFor":1.35,"team2AvgXGAgainst":1.45,"xGNote":"Team1 overperforms xG slightly"},
-    "travelFatigue":{"team1LastMatch":"3 days ago, home","team2LastMatch":"4 days ago, away","fatigueImpact":"Slight edge to Team1"},
-    "oddsMovement":"Market opened ${t1} at 2.40, now 2.10 — significant smart money on home win"
-  },
-  "correctScorePredictions":[
-    {"score":"1-0","probability":18,"odds":5.5},
-    {"score":"1-1","probability":12,"odds":6.5},
-    {"score":"2-0","probability":11,"odds":7.0}
-  ],
-  "goalscorers":[
-    {"player":"Real player name","team":"${t1}","odds":2.5,"probability":42,"role":"Striker"},
-    {"player":"Real player name","team":"${t2}","odds":3.5,"probability":29,"role":"Striker"},
-    {"player":"Real player name","team":"${t2}","odds":4.0,"probability":25,"role":"Midfielder"}
-  ],
-  "keyFactors":["Evidence-based factor 1","Factor 2","Factor 3","Factor 4","Factor 5"],
-  "injuries":[
-    {"player":"Name","team":"${t1}","status":"Out","impact":"High"},
-    {"player":"Name","team":"${t2}","status":"Doubtful","impact":"Medium"}
-  ],
-  "form":{
-    "team1":{
-      "overall":["W","W","D","L","W"],"home":["W","W","W"],"away":["D","L","W"],
-      "goalsFor":9,"goalsAgainst":4,"homeGoalsFor":6,"homeGoalsAgainst":2,"awayGoalsFor":3,"awayGoalsAgainst":2
-    },
-    "team2":{
-      "overall":["L","D","W","W","L"],"home":["W","W"],"away":["L","D","L"],
-      "goalsFor":6,"goalsAgainst":7,"homeGoalsFor":4,"homeGoalsAgainst":2,"awayGoalsFor":2,"awayGoalsAgainst":5
-    }
-  },
-  "headToHead":{"team1Wins":5,"draws":3,"team2Wins":2,"lastMeeting":"2-1 ${t1} (2024)","avgGoals":2.6,"totalMeetings":10},
-  "valueBets":[{"market":"Over/Under 2.5 Goals","pick":"Under 2.5","odds":1.90,"trueOdds":1.62,"edge":17,"reasoning":"specific evidence"}],
-  "additionalMarkets":[
-    {"market":"First Half 1X2","pick":"Home Win HT","odds":2.50,"confidence":52,"value":false,"reasoning":"concise reason"},
-    {"market":"Over/Under 1.5 Goals","pick":"Over 1.5","odds":1.40,"confidence":74,"value":false,"reasoning":"concise reason"},
-    {"market":"Over/Under 3.5 Goals","pick":"Under 3.5","odds":1.55,"confidence":68,"value":false,"reasoning":"concise reason"},
-    {"market":"Clean Sheet - ${t1}","pick":"Yes","odds":2.20,"confidence":41,"value":false,"reasoning":"concise reason"},
-    {"market":"Clean Sheet - ${t2}","pick":"No","odds":1.45,"confidence":63,"value":false,"reasoning":"concise reason"},
-    {"market":"Win to Nil - ${t1}","pick":"Yes","odds":3.50,"confidence":31,"value":false,"reasoning":"concise reason"},
-    {"market":"Score Draw","pick":"Yes","odds":3.80,"confidence":28,"value":false,"reasoning":"concise reason"},
-    {"market":"European Handicap -1","pick":"${t1}","odds":3.20,"confidence":38,"value":false,"reasoning":"concise reason"},
-    {"market":"BTTS + Over 2.5","pick":"Yes","odds":2.10,"confidence":44,"value":false,"reasoning":"concise reason"},
-    {"market":"Penalty to be Awarded","pick":"Yes","odds":2.40,"confidence":39,"value":false,"reasoning":"referee-based reason"}
-  ],
-  "riskLevel":"Medium",
-  "analystNote":"2-3 sentence expert summary of this prediction backed by the intelligence gathered.",
-  "lineupStatus":"CONFIRMED",
-  "dataQuality":"High",
-  "disclaimer":"For informational purposes only. Please gamble responsibly. 18+ only."
-}`;
+Now apply the methodology and JSON schema from the instructions above to ${t1} vs ${t2}. Remember: every "[Home Team]" placeholder in the schema means ${t1}, every "[Away Team]" placeholder means ${t2}. Fill in real values for this specific match throughout — team1/team2 fields, all picks, all lineups, all stats.`;
 }
 
 // ── RENDER RESULTS ──

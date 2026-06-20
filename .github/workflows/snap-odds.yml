@@ -1,69 +1,28 @@
-/**
- * FootballIQ v5 — /netlify/functions/snap-odds
- * Triggered every 2 hours by GitHub Actions (.github/workflows/snap-odds.yml)
- * via a simple HTTP GET — NOT a Netlify-billed scheduled function.
- * Snapshots current odds for major competitions to build
- * opening-line movement data over time.
- */
+name: Snapshot Odds Every 2 Hours
 
-"use strict";
+# Free replacement for Netlify's billed scheduled-function feature.
+# Runs on GitHub's infrastructure (free for public repos) and simply
+# pings the existing snap-odds Netlify Function via HTTP every 2 hours.
 
-const { getStore } = require("@netlify/blobs");
+on:
+  schedule:
+    - cron: '0 */2 * * *'
+  workflow_dispatch:   # lets you trigger it manually from the Actions tab to test
 
-const TOP_SPORTS = [
-  "soccer_epl",
-  "soccer_spain_la_liga",
-  "soccer_italy_serie_a",
-  "soccer_germany_bundesliga",
-  "soccer_france_ligue_one",
-  "soccer_uefa_champs_league",
-  "soccer_uefa_europa_league",
-  "soccer_usa_mls",
-];
-
-async function fetchOdds(sportKey, apiKey) {
-  const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds/?apiKey=${apiKey}&regions=eu&markets=h2h&oddsFormat=decimal`;
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!resp.ok) return null;
-    return resp.json();
-  } catch { return null; }
-}
-
-exports.handler = async () => {
-  const apiKey = process.env.ODDS_API_KEY;
-  if (!apiKey) {
-    console.log("snap-odds: ODDS_API_KEY not set — skipping snapshot");
-    return { statusCode: 200, body: "no key" };
-  }
-
-  const store  = getStore("fiq-odds-snapshots");
-  const today  = new Date().toISOString().split("T")[0];
-  const ts     = Date.now();
-  let snapped  = 0;
-
-  for (const sport of TOP_SPORTS) {
-    // Only save the FIRST snapshot each day — this becomes the opening line
-    const openingKey = `opening:${sport}:${today}`;
-    try {
-      const existing = await store.get(openingKey).catch(() => null);
-      if (!existing) {
-        const data = await fetchOdds(sport, apiKey);
-        if (data && data.length > 0) {
-          await store.set(openingKey, JSON.stringify(data), { metadata: { ts, sport, today } });
-          snapped++;
-          console.log(`snap-odds: stored opening line for ${sport} (${data.length} games)`);
-        }
-      }
-    } catch (e) {
-      console.error(`snap-odds: error for ${sport}:`, e.message);
-    }
-    // Small delay to avoid rate limiting
-    await new Promise(r => setTimeout(r, 300));
-  }
-
-  return {
-    statusCode: 200,
-    body: JSON.stringify({ snapped, ts, sports: TOP_SPORTS.length }),
-  };
-};
+jobs:
+  snap-odds:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call snap-odds function
+        run: |
+          echo "Pinging snap-odds endpoint..."
+          HTTP_CODE=$(curl -s -o response.txt -w "%{http_code}" --max-time 30 https://ftliq.netlify.app/.netlify/functions/snap-odds)
+          echo "HTTP status: $HTTP_CODE"
+          echo "Response body:"
+          cat response.txt
+          echo ""
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "::error::snap-odds endpoint returned HTTP $HTTP_CODE"
+            exit 1
+          fi
+          echo "Success."

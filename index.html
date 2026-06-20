@@ -1151,7 +1151,7 @@ function parseJSON(raw){
 // ── NETLIFY FUNCTION CALLS ─────────────────────────────────────────
 async function fetchXGData(team, comp){
   try{
-    const r=await fetch(`/.netlify/functions/xg?team=${encodeURIComponent(team)}&competition=${encodeURIComponent(comp)}`);
+    const r=await fetch(`/api/xg?team=${encodeURIComponent(team)}&competition=${encodeURIComponent(comp)}`);
     if(!r.ok)return null;
     const d=await r.json();
     return d.success?d.data:null;
@@ -1161,7 +1161,7 @@ async function fetchXGData(team, comp){
 async function fetchRefereeStats(name, comp){
   if(!name||name.length<4)return null;
   try{
-    const r=await fetch(`/.netlify/functions/referee?name=${encodeURIComponent(name)}&competition=${encodeURIComponent(comp)}`);
+    const r=await fetch(`/api/referee?name=${encodeURIComponent(name)}&competition=${encodeURIComponent(comp)}`);
     if(!r.ok)return null;
     const d=await r.json();
     return d.success?d.data:null;
@@ -1170,7 +1170,7 @@ async function fetchRefereeStats(name, comp){
 
 async function fetchLiveOddsProxy(comp){
   try{
-    const r=await fetch(`/.netlify/functions/odds?competition=${encodeURIComponent(comp)}`);
+    const r=await fetch(`/api/odds?competition=${encodeURIComponent(comp)}`);
     if(!r.ok)return null;
     const d=await r.json();
     return d.success?{games:d.games,movement:d.movement}:null;

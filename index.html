@@ -1651,6 +1651,12 @@ async function doAnalyze(forceRefresh=false){
         if(!p)throw new Error("Could not repair JSON. Please try again.");
       } else { throw e; }
     }
+    // ALWAYS trust the user's exact dropdown selection over whatever
+    // Claude generated for this field — Phase 1 research sometimes
+    // surfaces older "qualifying campaign" coverage for teams that have
+    // since reached the actual tournament, which can otherwise leak
+    // into a mislabeled competition name despite correct user input.
+    p.competition = comp;
     p._liveOdds = liveOdds?matchToTeam(liveOdds,t1,t2):null;
     p._movement = lineMovement;
     p._lineupStatus = lineupStatus;

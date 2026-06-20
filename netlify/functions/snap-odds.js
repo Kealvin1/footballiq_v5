@@ -1,8 +1,9 @@
 /**
  * FootballIQ v5 — /netlify/functions/snap-odds
- * Scheduled: runs every 2 hours (cron: "0 * /2 * * *")
+ * Triggered every 2 hours by GitHub Actions (.github/workflows/snap-odds.yml)
+ * via a simple HTTP GET — NOT a Netlify-billed scheduled function.
  * Snapshots current odds for major competitions to build
- * opening-line movement data over time
+ * opening-line movement data over time.
  */
 
 "use strict";

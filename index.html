@@ -1244,14 +1244,21 @@ function refreshAnalysis(){
 // ── DETECT LINEUP STATUS from Phase 1 intel text ────────────────────
 function detectLineupStatus(intelText){
   const t=intelText||"";
-  // Flexible regex: tolerates "LINEUPS:", extra words, different casing
-  const m=t.match(/lineups?\s*[:\-]\s*(confirmed|predicted)/i);
-  if(m)return m[1].toLowerCase();
+  // Flexible regex: tolerates "LINEUPS:", extra words, different casing, 3-tier states
+  const m=t.match(/lineups?\s*[:\-]\s*(verified|confirmed-single|confirmed|predicted)/i);
+  if(m){
+    const tag=m[1].toLowerCase();
+    if(tag==="verified")return"verified";
+    if(tag==="confirmed-single")return"confirmed";
+    if(tag==="confirmed")return"confirmed"; // backward-compat with older single-tier wording
+    return"predicted";
+  }
   // Fallback: keyword scan
   const tl=t.toLowerCase();
+  if(tl.includes("verified")&&(tl.includes("2 source")||tl.includes("two source")||tl.includes("multiple source")||tl.includes("both confirm")))return"verified";
   if(tl.includes("confirmed lineup")||tl.includes("official starting")||
      tl.includes("confirmed xi")||tl.includes("confirmed starting xi")||
-     tl.includes("official xi"))return"confirmed";
+     tl.includes("official xi")||tl.includes("single source"))return"confirmed";
   if(tl.includes("predicted lineup")||tl.includes("predicted xi")||
      tl.includes("expected lineup")||tl.includes("expected xi"))return"predicted";
   // Final fallback: count real player names found
@@ -1325,10 +1332,13 @@ function goHome(){
 function renderLineupBadges(status){
   const _lsEl=document.getElementById("lineup-status-badge");
   if(_lsEl){
-    _lsEl.style.cursor="pointer";_lsEl.title="Click to correct if needed";
-    if(status==="confirmed"){
-      _lsEl.innerHTML='<i class="ti ti-check"></i> Lineups Confirmed';
-      _lsEl.style.cssText="cursor:pointer;background:rgba(0,200,150,0.12);color:#00c896;border:1px solid rgba(0,200,150,0.3);font-size:10px;font-weight:800;padding:3px 10px;border-radius:6px;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px";
+    _lsEl.style.cursor="pointer";_lsEl.title="Click to cycle: Verified → Confirmed → Predicted";
+    if(status==="verified"){
+      _lsEl.innerHTML='<i class="ti ti-shield-check"></i> Lineups Verified (2+ sources)';
+      _lsEl.style.cssText="cursor:pointer;background:rgba(0,200,150,0.18);color:#00e6a8;border:1px solid rgba(0,200,150,0.45);font-size:10px;font-weight:800;padding:3px 10px;border-radius:6px;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px";
+    }else if(status==="confirmed"){
+      _lsEl.innerHTML='<i class="ti ti-check"></i> Lineups Confirmed (1 source)';
+      _lsEl.style.cssText="cursor:pointer;background:rgba(0,200,150,0.1);color:#00c896;border:1px solid rgba(0,200,150,0.25);font-size:10px;font-weight:800;padding:3px 10px;border-radius:6px;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px";
     }else if(status==="predicted"){
       _lsEl.innerHTML='<i class="ti ti-dots"></i> Lineups Predicted';
       _lsEl.style.cssText="cursor:pointer;background:rgba(255,184,48,0.1);color:#ffb830;border:1px solid rgba(255,184,48,0.3);font-size:10px;font-weight:800;padding:3px 10px;border-radius:6px;letter-spacing:.06em;display:inline-flex;align-items:center;gap:4px";
@@ -1336,8 +1346,10 @@ function renderLineupBadges(status){
   }
   const _intelEl=document.getElementById("intel-lineup-badge");
   if(_intelEl){
-    _intelEl.innerHTML=status==="confirmed"
-      ? ' <span style="font-size:9px;font-weight:800;background:rgba(0,200,150,0.12);color:#00c896;border:1px solid rgba(0,200,150,0.3);padding:2px 8px;border-radius:5px;margin-left:6px;letter-spacing:.06em">✓ CONFIRMED</span>'
+    _intelEl.innerHTML=status==="verified"
+      ? ' <span style="font-size:9px;font-weight:800;background:rgba(0,200,150,0.18);color:#00e6a8;border:1px solid rgba(0,200,150,0.45);padding:2px 8px;border-radius:5px;margin-left:6px;letter-spacing:.06em">✓✓ VERIFIED</span>'
+      : status==="confirmed"
+      ? ' <span style="font-size:9px;font-weight:800;background:rgba(0,200,150,0.1);color:#00c896;border:1px solid rgba(0,200,150,0.25);padding:2px 8px;border-radius:5px;margin-left:6px;letter-spacing:.06em">✓ CONFIRMED (1 SRC)</span>'
       : status==="predicted"
       ? ' <span style="font-size:9px;font-weight:800;background:rgba(255,184,48,0.1);color:#ffb830;border:1px solid rgba(255,184,48,0.3);padding:2px 8px;border-radius:5px;margin-left:6px;letter-spacing:.06em">~ PREDICTED</span>'
       : "";
@@ -1345,13 +1357,16 @@ function renderLineupBadges(status){
 }
 function toggleLineupStatus(){
   if(!curPred)return;
-  curPred._lineupStatus = curPred._lineupStatus==="confirmed" ? "predicted" : "confirmed";
+  // Cycle: verified → confirmed → predicted → verified...
+  const cycle={verified:"confirmed",confirmed:"predicted",predicted:"verified"};
+  curPred._lineupStatus = cycle[curPred._lineupStatus] || "verified";
   if(_curCacheKey){
     const cached=cacheGet(_curCacheKey);
     if(cached){cached._lineupStatus=curPred._lineupStatus;cacheSet(_curCacheKey,cached)}
   }
   renderLineupBadges(curPred._lineupStatus);
-  toast(curPred._lineupStatus==="confirmed"?"Marked as Confirmed ✓ — you know the real lineup":"Marked as Predicted ~");
+  const msgs={verified:"Marked as Verified ✓✓ — you've confirmed via 2+ sources",confirmed:"Marked as Confirmed (1 source) ✓",predicted:"Marked as Predicted ~"};
+  toast(msgs[curPred._lineupStatus]);
 }
 
 
@@ -1657,8 +1672,20 @@ ${movBlock}
 
 RUN 3 TARGETED WEB SEARCHES FIRST:
 
-Search 1 → "${t1} vs ${t2} confirmed lineup site:sports.yahoo.com OR site:bbc.com OR site:espn.com OR site:rotowire.com"
-  Find: The actual starting eleven from these fast-updating, reliable outlets first — they tend to publish confirmed lineups within minutes of official release. If this targeted search returns nothing useful (common for smaller competitions these sites don't cover), fall back to a general search: "${t1} ${t2} confirmed lineup starting XI today" and "${t1} starting XI confirmed" / "${t2} lineup confirmed". Close to kickoff (within 90 minutes), lineups are almost always publicly available from club social accounts, major sports outlets (BBC, Sky Sports, ESPN, Yahoo Sports, UEFA/FIFA official feeds) or live score apps. If you find specific named players in specific positions from ANY credible source for THIS match, classify as CONFIRMED even if the source doesn't use the word "official". Prefer the most recently published source if multiple conflicting lineups are found.
+Search 1 → "${t1} lineup vs ${t2} confirmed"
+  Find: Major sports news outlets (NBC Sports, ESPN, BBC, Fox Sports, Yahoo Sports, Sky Sports, Sports Illustrated / SI.com — which also publishes strong Spanish-language coverage at si.com/es-us, MSN Sport), global multi-language outlets (Goal.com and its country editions like goal.com/fr, goal.com/es, goal.com/it, goal.com/de), regional specialists (Footmercato.net and Canal Supporters for French football), sports betting/fantasy research sites (FanDuel, PrizePicks, RotoWire), and FotMob news articles regularly publish "[Team] lineup confirmed" articles in plain prose text within minutes of official release — these ARE indexed by search and reliably surface real player names with shirt numbers, captain markers, and substitute benches, often including which player was benched/substituted and why (a useful cross-check). These sources work consistently across ALL competitions — top European leagues, international tournaments, cup competitions — not just high-profile fixtures.
+  HIGHEST PRIORITY: an official club social media post (Twitter/X, Instagram) showing the actual starting XI is the primary source and should be trusted above any news site reporting on it. CAUTION: official club WEBSITE match-centre/lineup pages (e.g. a URL ending in "/lineup" or "/matchcentre") often render the lineup as a JavaScript graphic just like Sofascore — if the indexed text only shows a generic phrase like "Find out the line-ups for the match..." with no actual player names, treat it the same as a Sofascore non-result and search elsewhere.
+  THE GENERAL PATTERN TO RECOGNIZE (applies across every site, every country, every language): a NEWS ARTICLE or BLOG POST written in prose that announces the lineup as part of a written story ALWAYS has real, searchable player names. A dedicated MATCH-CENTRE or LINEUP-GRAPHIC page (regardless of which domain hosts it — official club sites, ESPN's /lineups/ page, Sofascore, BeSoccer, FutbolFantasy, 365scores, FotMob's match page) is frequently JavaScript-rendered and returns no usable names even when the domain looks authoritative. Judge each result by whether it actually contains written player names in sentences, not by which domain it came from.
+  FOR NON-ENGLISH COMPETITIONS: searching in the home country's language often surfaces strong specialist outlets that English-only searches miss — for example French football coverage from Footmercato.net, Canal Supporters, or Goal.com's French edition (goal.com/fr) is frequently more detailed and faster than English sources for Ligue 1 matches. Goal.com in particular publishes dozens of country/language editions (goal.com/es, goal.com/it, goal.com/de, goal.com/en-gh for Ghana/West Africa, goal.com/en-my for Southeast Asia, etc.) and is reliably good for prose-based confirmed lineups globally, including African, Asian, and Middle Eastern competitions, not just Europe. If initial English-language searches don't surface a confirmed lineup, try the search again using the competition's home-country language and major local sports terms (e.g. "compositions officielles" for France, "alineación confirmada" for Spain, "formazione ufficiale" for Italy, "aufstellung bestätigt" for Germany, "escalação confirmada" for Brazil, "alineaciones confirmadas" for Argentina/Spanish South America).
+
+  FOR SOUTH AMERICAN COMPETITIONS (Brasileirão, Copa Libertadores, Argentine Primera, etc.): regional outlets CNN Brasil, Lance (lance.com.br), ESPN's Brazilian edition (espn.com.br), Band (band.com.br) for Brazilian football, and Soccerway's regional editions (br.soccerway.com for Portuguese, es.soccerway.com for Spanish) consistently return clean prose-based confirmed lineups. Even official club websites in South America sometimes publish match-preview articles (not just JS-rendered match-centre pages) with the lineup written out in the article text — these work fine, the same prose-vs-graphic distinction applies.
+
+  FOR AFRICAN AND MIDDLE EASTERN COMPETITIONS (AFCON, CAF Champions League, Saudi Pro League, etc.): World Soccer Talk (worldsoccertalk.com) has proven reliable across both Saudi Pro League and AFCON coverage. Regional outlets like Morocco World News and Africa Top Sports (africatopsports.com) provide strong AFCON-specific coverage. For Saudi/Gulf football, prefer news articles over the league's own official website (spl.com.sa), which — like many official competition sites — only returns generic navigation menus through search, not actual lineup data.
+
+  AVOID treating these as reliable confirmed-lineup sources even if they appear in results: generic lineup-database/squad-builder tools (sites with names like "lineups.app", "football-lineups.com", "playmakerstats.com") often show outdated, predicted, or template-based squads rather than today's actual confirmed XI — their content is frequently disconnected from the specific match being searched for. Treat these the same as Sofascore-style results: useful only if they explicitly contain real, specific, dated prose text — not generic squad lists.
+  If unclear, ALSO try "${t1} ${t2} confirmed starting XI" and "${t1} ${t2} injury news today" (injury-confirmation articles frequently name the replacement player and confirm the XI in the same piece).
+  IMPORTANT: live-score aggregator sites (Sofascore, OneFootball, Flashscore) display lineups as a visual graphic rendered by JavaScript on their match-centre page — this data is NOT accessible through web search even when these domains appear in results, because search only indexes static page text, not the rendered graphic. A Sofascore/OneFootball/Flashscore result that only shows generic team-page or match-preview text (ratings, team rankings, "follow live score") with no actual player names is NOT lineup confirmation — disregard it and search elsewhere. The one exception: if a Sofascore/OneFootball "news" article (not the match-centre page) explicitly writes out player names in prose, that text content IS valid.
+  Close to kickoff (within 90 minutes), lineups are almost always publicly available from the news-article sources above or official club social accounts. If you find specific named players in specific positions from ANY credible prose source for THIS match, classify as CONFIRMED even if the source doesn't use the word "official". Prefer the most recently published source (check the article timestamp) if multiple conflicting lineups are found, and treat an explicit "subs include: [Player X]" mention as proof that player is NOT in the starting XI even if an older source listed them as starting.
 
 Search 2 → "${t1} ${t2} head to head history all meetings referee ${comp}"
   Find: ALL previous meetings between these two teams with results. Named referee and their reputation/stats. Venue and competition context.
@@ -1671,9 +1698,11 @@ Search 3 → "${t1} ${t2} preview weather odds ${comp}"
 
 AFTER completing all 3 searches, before writing your full report, assess two things based on what you actually found:
 
-(1) LINEUP STATUS:
-→ CONFIRMED: You found specific named players with positions from any credible source reporting the ACTUAL starting eleven for this specific match. If a source presents these 11 names as the team that is playing — even without the word "official" — treat as CONFIRMED.
-→ PREDICTED: You only found general squad news, injury reports, or explicit "predicted/expected lineup" speculation with no source confirming the actual starting players.
+(1) LINEUP STATUS — cross-reference against multiple sources before declaring full confirmation:
+After your searches, check whether the SAME starting XI (same 11 names, or at minimum the same key players in the same roles) appears in MORE THAN ONE independent source — two different articles, an article plus a club social media post, etc. (two articles that are clearly just syndicating/copying the exact same wire-service text do NOT count as two independent sources — look for genuinely separate reporting).
+→ VERIFIED: The same starting XI is corroborated by 2 or more independent sources. This is the strongest possible confirmation — genuine cross-checked certainty.
+→ CONFIRMED-SINGLE: Only ONE credible source reports the actual starting XI with real named players, and you could not find a second source to corroborate it (common when checking very close to kickoff, before wider coverage catches up). Still treat the names as likely accurate, but flag the lower certainty.
+→ PREDICTED: You only found general squad news, injury reports, or explicit "predicted/expected lineup" speculation with no source confirming the actual starting players at all.
 
 (2) DATA RICHNESS FOR THIS SPECIFIC MATCHUP — assess ALL four factors independently:
 
@@ -1704,7 +1733,7 @@ OVERALL DATA RICHNESS VERDICT (apply the most cautious individual factor):
 → MINIMAL ✗: ANY factor is MINIMAL (even if the competition is prestigious)
 
 MANDATORY OUTPUT FORMAT — write these as the very first two lines of your response, exactly in this format:
-LINEUPS: CONFIRMED ✓ (or PREDICTED ~) — one sentence why
+LINEUPS: VERIFIED ✓✓ (or CONFIRMED-SINGLE ✓ or PREDICTED ~) — one sentence stating how many sources agreed and why
 DATA: RICH ✓ (or LIMITED ~ or MINIMAL ✗) — one sentence why
 
 Then provide your full intelligence report below those two lines.

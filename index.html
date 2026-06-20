@@ -1683,12 +1683,12 @@ Search 1 → "${t1} lineup vs ${t2} confirmed"
   FOR AFRICAN AND MIDDLE EASTERN COMPETITIONS (AFCON, CAF Champions League, Saudi Pro League, etc.): World Soccer Talk (worldsoccertalk.com) has proven reliable across both Saudi Pro League and AFCON coverage. Regional outlets like Morocco World News and Africa Top Sports (africatopsports.com) provide strong AFCON-specific coverage. For Saudi/Gulf football, prefer news articles over the league's own official website (spl.com.sa), which — like many official competition sites — only returns generic navigation menus through search, not actual lineup data.
 
   AVOID treating these as reliable confirmed-lineup sources even if they appear in results: generic lineup-database/squad-builder tools (sites with names like "lineups.app", "football-lineups.com", "playmakerstats.com") often show outdated, predicted, or template-based squads rather than today's actual confirmed XI — their content is frequently disconnected from the specific match being searched for. Treat these the same as Sofascore-style results: useful only if they explicitly contain real, specific, dated prose text — not generic squad lists.
-  If unclear, ALSO try "${t1} ${t2} confirmed starting XI" and "${t1} ${t2} injury news today" (injury-confirmation articles frequently name the replacement player and confirm the XI in the same piece).
+  If unclear, ALSO try "${t1} ${t2} confirmed starting XI" and "${t1} ${t2} injury news today" (injury-confirmation articles frequently name the replacement player and confirm the XI in the same piece — for any injury claim that's central to your analysis, try to see it repeated in at least one more article before treating it as certain, the same way you would for lineups).
   IMPORTANT: live-score aggregator sites (Sofascore, OneFootball, Flashscore) display lineups as a visual graphic rendered by JavaScript on their match-centre page — this data is NOT accessible through web search even when these domains appear in results, because search only indexes static page text, not the rendered graphic. A Sofascore/OneFootball/Flashscore result that only shows generic team-page or match-preview text (ratings, team rankings, "follow live score") with no actual player names is NOT lineup confirmation — disregard it and search elsewhere. The one exception: if a Sofascore/OneFootball "news" article (not the match-centre page) explicitly writes out player names in prose, that text content IS valid.
   Close to kickoff (within 90 minutes), lineups are almost always publicly available from the news-article sources above or official club social accounts. If you find specific named players in specific positions from ANY credible prose source for THIS match, classify as CONFIRMED even if the source doesn't use the word "official". Prefer the most recently published source (check the article timestamp) if multiple conflicting lineups are found, and treat an explicit "subs include: [Player X]" mention as proof that player is NOT in the starting XI even if an older source listed them as starting.
 
 Search 2 → "${t1} ${t2} head to head history all meetings referee ${comp}"
-  Find: ALL previous meetings between these two teams with results. Named referee and their reputation/stats. Venue and competition context.
+  Find: ALL previous meetings between these two teams with results. Named referee and their reputation/stats — if possible, try to spot the referee name in a second source too (e.g. a separate preview article) to corroborate it. Venue and competition context.
 
 Search 2b (if referee not found above) → "${t1} ${t2} referee 2026 World Cup appointed"
   Find: Who is refereeing this specific match and their known tendencies.
@@ -1704,6 +1704,13 @@ After your searches, check whether the SAME starting XI (same 11 names, or at mi
 → CONFIRMED-SINGLE: Only ONE credible source reports the actual starting XI with real named players, and you could not find a second source to corroborate it (common when checking very close to kickoff, before wider coverage catches up). Still treat the names as likely accurate, but flag the lower certainty.
 → PREDICTED: You only found general squad news, injury reports, or explicit "predicted/expected lineup" speculation with no source confirming the actual starting players at all.
 
+(1B) INJURY & AVAILABILITY STATUS — apply the SAME cross-reference rigor as lineups, because injury reports are just as volatile and just as often disputed between sources (one source says "doubtful", another says "ruled out", another says "back in training" — all for the same player on the same day):
+For each significant injury/availability claim that materially affects your analysis (a key player being out, doubtful, or returning), note internally whether it was corroborated by 2+ sources or only found in 1. When writing the injury/keyFactors sections in Phase 2 output, prefer claims corroborated by multiple sources, and where a single-source claim is genuinely decisive for your prediction (e.g. "their best striker is out"), phrase it with appropriate hedging rather than full certainty if only one source reported it.
+
+(1C) REFEREE ASSIGNMENT — confirm via 2+ sources where possible, since referee appointments occasionally change close to kickoff and conflicting names sometimes appear in search results. If multiple sources agree on the same referee, treat that as solid. If only one source names a referee, treat it as likely but not certain.
+
+NOTE ON HISTORICAL FACTS: Head-to-head results, recent match scores, and league standings are SETTLED PUBLIC RECORD — these are not predictions and rarely genuinely disputed between sources, so single-source reporting is normally fine for these (unless you notice an actual numeric discrepancy between sources, in which case prefer the more recent or more reputable one and note the uncertainty). The 2-source corroboration requirement above applies specifically to near-term, changeable, prediction-like facts — lineups, injuries, and referee assignment — not to historical scorelines.
+
 (2) DATA RICHNESS FOR THIS SPECIFIC MATCHUP — assess ALL four factors independently:
 
 FACTOR A — SQUAD QUALITY:
@@ -1718,8 +1725,8 @@ FACTOR B — HEAD-TO-HEAD HISTORY:
 → MINIMAL: No previous meetings found between these specific teams (first ever fixture, or no recorded history)
 
 FACTOR C — REFEREE DATA:
-→ RICH: Named referee found with cards/game stats, known reputation
-→ LIMITED: Referee named but no meaningful stats found, or referee is rarely covered internationally
+→ RICH: Named referee corroborated by 2+ sources, with cards/game stats and known reputation found
+→ LIMITED: Referee named by only 1 source, or named with no meaningful stats found, or rarely covered internationally
 → MINIMAL: No referee information available, or referee is entirely unknown
 
 FACTOR D — RECENT FORM DATA:

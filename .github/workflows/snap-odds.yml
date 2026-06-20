@@ -1,28 +1,44 @@
 name: Snapshot Odds Every 2 Hours
 
-# Free replacement for Netlify's billed scheduled-function feature.
-# Runs on GitHub's infrastructure (free for public repos) and simply
-# pings the existing snap-odds Netlify Function via HTTP every 2 hours.
+# Replaces the old Netlify scheduled function entirely. Runs on GitHub's
+# free infrastructure, fetches opening-line odds for 8 top competitions,
+# and commits them straight into the repo as JSON files. The Vercel
+# odds.js function then reads these files to calculate line movement —
+# no external database needed.
 
 on:
   schedule:
     - cron: '0 */2 * * *'
   workflow_dispatch:   # lets you trigger it manually from the Actions tab to test
 
+permissions:
+  contents: write   # needed so this workflow can commit the snapshot files back
+
 jobs:
   snap-odds:
     runs-on: ubuntu-latest
     steps:
-      - name: Call snap-odds function
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run odds snapshot script
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: node scripts/snap-odds.js
+
+      - name: Commit and push any new snapshot files
         run: |
-          echo "Pinging snap-odds endpoint..."
-          HTTP_CODE=$(curl -s -o response.txt -w "%{http_code}" --max-time 30 https://ftliq.netlify.app/.netlify/functions/snap-odds)
-          echo "HTTP status: $HTTP_CODE"
-          echo "Response body:"
-          cat response.txt
-          echo ""
-          if [ "$HTTP_CODE" -ge 400 ]; then
-            echo "::error::snap-odds endpoint returned HTTP $HTTP_CODE"
-            exit 1
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/opening-lines/
+          if git diff --cached --quiet; then
+            echo "No new snapshots to commit."
+          else
+            git commit -m "Snapshot opening lines $(date -u +%Y-%m-%d_%H-%M)"
+            git push
           fi
-          echo "Success."

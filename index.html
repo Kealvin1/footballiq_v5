@@ -2418,9 +2418,13 @@ IMPORTANT: if ${comp} is a major tournament currently in progress (World Cup, AF
 
 SEARCH STRATEGY: try a direct query like "${comp} schedule fixtures ${when}" or "${comp} matches this week schedule". If that doesn't surface a clear list, try the official competition name plus "fixtures" and the specific date range.
 
+ABSOLUTE RULE — EVERY FIXTURE MUST COME FROM AN ACTUAL SEARCH RESULT, NOT GENERAL KNOWLEDGE OR INFERENCE: only include a fixture (which two teams play each other, what group/round, what date) if you found that EXACT pairing explicitly stated in a real search result. Do NOT construct fixtures by combining separately-known facts (e.g. "I know Team A is in this tournament and Team B is in this tournament, so they're probably playing this week" or "I know roughly which group stage round this is, so I'll generate one plausible match per group") — that is fabrication, even if every individual team name is real. Group assignments in particular are frequently misremembered or invented — never state which group a team is in unless you found that specific group assignment in a search result for this exact query, since an incorrect group assignment is a hard factual error, not a minor uncertainty.
+
+WHAT IS OK to estimate when the match itself IS confirmed via search: only the exact kickoff TIME may be a reasonable estimate (e.g. "evening kickoff, typically 20:00 local" style sources) if a precise time isn't stated but the match itself is otherwise confirmed.
+
 Return ONLY valid JSON (no markdown, no code fences, no trailing commas):
 {"competition":"${comp}","date":"${when}","fixtures":[{"home":"Team A","away":"Team B","time":"20:00","venue":"Stadium","round":"Round 1"}]}
-List at most the 15 most relevant real fixtures found, ordered by date. It is fine to include a fixture even if one minor field (e.g. exact kickoff time or venue) is uncertain — use your best estimate rather than omitting the whole fixture. Only return an empty array if you are confident there are genuinely no fixtures in this competition during this window — not simply because you're unsure. Do not invent fixtures between teams or on dates you have no search evidence for.`;
+List at most the 15 most relevant real fixtures found, ordered by date — but it is completely normal and expected to return FEWER than 15, or even an empty array, if that's genuinely what your searches turned up. Returning 2-3 fixtures you actually verified via search is far better than returning a complete-looking list that includes invented pairings or guessed group assignments. If your search results don't clearly support a specific fixture, leave it out rather than filling the gap with a plausible-sounding guess.`;
   try{
     let raw;
     try{

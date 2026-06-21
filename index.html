@@ -955,13 +955,13 @@ const PHASE2_STATIC_PROMPT=`You are a world-class football betting analyst with 
 
 Now reason through this match step by step before producing your final output:
 
-STEP 1 — SQUAD: Phase 1 flagged lineups as CONFIRMED ✓ (use as facts) or PREDICTED ~ (factor uncertainty into confidence). Compare XIs and assess absences impact.
+STEP 1 — SQUAD: Phase 1 flagged lineups as CONFIRMED ✓ (use as facts) or PREDICTED ~ (factor uncertainty into confidence). Compare XIs and assess absences impact. If a backup goalkeeper is starting in place of the regular #1, treat this as a genuine quality factor, not a footnote — keepers vary significantly in shot-stopping reliability. If squad stability notes mention a very recent new signing or unrest, factor in realistic integration time rather than assuming full effectiveness immediately.
 STEP 2 — FORM & xG: Analyse HOME form and AWAY form SEPARATELY — this is critical. Many teams play very differently home vs away. Also: if actual goals scored/conceded deviates from xG by >0.3 per game over last 5 matches, explicitly model regression toward xG mean in your Over/Under and BTTS predictions. State the direction and magnitude of expected correction.
-STEP 3 — TACTICAL MATCHUP: How do their systems interact? Any structural mismatches to exploit?
-STEP 4 — CONTEXT & PSYCHOLOGY: What are the stakes? Any motivation imbalances? Home/away form split?
+STEP 3 — TACTICAL MATCHUP: How do their systems interact? Use the coaching intel gathered — each manager's tactical style and preferred formation — to reason about structural mismatches (e.g. a high-press side facing a team that struggles to build out from the back; a possession-heavy side facing a low block). If one team has a brand-new manager (tenure of only a few weeks/months), factor in genuine tactical uncertainty — a new system may not be fully bedded in yet, win streaks under new managers are common short-term but not always indicative of sustained quality.
+STEP 4 — CONTEXT & PSYCHOLOGY: What are the stakes? Any motivation imbalances? Home/away form split? Also factor in the manager-pressure intel — a coach under genuine pressure (poor recent results, media speculation about their job) can manifest as a team in two opposite ways: either visibly nervous/low-confidence performances, or a galvanized response from players fighting for their manager. A secure, experienced coach with strong dressing-room backing typically produces more stable, predictable performances than an under-fire or brand-new appointment. If real reporting suggests player unhappiness with the coach specifically, weigh this as a genuine risk factor for an underperformance, not just background color.
 STEP 5 — PHYSICAL FACTORS: How do weather, fatigue, and travel affect the game and specific markets?
-STEP 6 — REFEREE INFLUENCE: How does this referee's style affect cards, penalties and match tempo?
-STEP 7 — CORNERS ANALYSIS: Pressing intensity, set piece specialists, defensive shape → corner volume expected?
+STEP 6 — REFEREE INFLUENCE: How does this referee's style affect cards, penalties and match tempo? If any player is flagged as a suspension risk (one yellow from a ban) and this referee has a high card rate, that player carries elevated risk of an early booking influencing their game management — and the team may set up more cautiously to protect them.
+STEP 7 — CORNERS ANALYSIS: Pressing intensity, set piece specialists, defensive shape → corner volume expected? Use the actual named set-piece takers if found — a team with a genuine aerial/delivery threat at corners is a different proposition than one without a clear taker identified, independent of overall attacking quality.
 STEP 8 — MARKET VALUE: For each key market, compute: implied_probability = 1/odds. Also analyse the 10 additionalMarkets — use xG data for goals markets, HT xG splits for First Half 1X2, referee stats for Penalty, team xGA for Clean Sheet. Compare to your estimated true_probability. Only mark value=true when edge = (true_prob - implied_prob) / implied_prob > 0.05 (5%+ edge). Show the calculation. This prevents false value flags.
 STEP 9 — DEVIL'S ADVOCATE: Before finalising your main prediction, briefly construct the strongest realistic case for the OPPOSITE outcome (if you're leaning toward a home win, genuinely consider what would need to be true for an away win or draw instead). If this counter-case reveals a real weakness in your initial lean, adjust your confidence downward accordingly — do not just acknowledge the counter-case and then ignore it. This step exists specifically to catch overconfidence from anchoring on the first plausible conclusion.
 
@@ -1008,6 +1008,16 @@ After reasoning, output ONLY a valid JSON object (NO markdown, NO code fences (n
     "team2Lineup":["GK: Name","RB: Name","CB: Name","CB: Name","LB: Name","CM: Name","CM: Name","CM: Name","RW: Name","ST: Name","LW: Name"],
     "team1Formation":"4-3-3",
     "team2Formation":"4-2-3-1",
+    "coaching":{
+      "team1Coach":{"name":"Coach Name or null","tacticalStyle":"e.g. possession-based, high-press","formation":"4-3-3","tenure":"e.g. appointed 8 months ago","experienceLevel":"Veteran — 10+ years senior management OR First-time senior manager OR Experienced — 3-5 years","pressureStatus":"e.g. Under pressure after 3 straight losses OR Secure, recently extended contract OR Too early to assess","playerSentiment":"e.g. Reports of dressing-room unrest OR Strong squad support reported OR No reporting found either way"},
+      "team2Coach":{"name":"Coach Name or null","tacticalStyle":"brief style descriptor","formation":"4-2-3-1","tenure":"tenure descriptor","experienceLevel":"experience descriptor","pressureStatus":"pressure descriptor","playerSentiment":"sentiment descriptor"}
+    },
+    "keyPlayerNotes":{
+      "suspensionRisk":[{"player":"Real player name","team":"[Home Team]","note":"One yellow card from a one-match ban"}],
+      "setPieceTakers":{"team1":{"corners":"Player name or null","freeKicks":"Player name or null","penalties":"Player name or null"},"team2":{"corners":"Player name or null","freeKicks":"Player name or null","penalties":"Player name or null"}},
+      "goalkeeperNote":"e.g. Backup keeper starting in place of injured #1 OR null if regular starter confirmed",
+      "squadStability":"e.g. New signing started his first match this week OR null if nothing notable"
+    },
     "weather":{"condition":"Clear","temperature":"18°C","wind":"12 km/h","humidity":"60%","impact":"Minimal — good playing conditions"},
     "referee":{"name":"Referee Name","nationality":"Country","avgCardsPerGame":4.2,"avgYellowPerGame":3.9,"avgRedPerGame":0.15,"penaltyRate":"12% of games","homeBias":"Neutral","impactNote":"Strict — expect bookings"},
     "xGData":{"team1AvgXGFor":1.82,"team1AvgXGAgainst":1.12,"team2AvgXGFor":1.35,"team2AvgXGAgainst":1.45,"xGNote":"Team1 overperforms xG slightly"},
@@ -1725,7 +1735,7 @@ async function doAnalyze(forceRefresh=false){
       // verification, referee neutrality, weather, stakes language, form
       // priority, rotation, on top of lineup/injury corroboration) and
       // needs more room to complete without truncating.
-      intel = await callAI(intelPrompt, 8000, true, "", "claude-haiku-4-5-20251001");
+      intel = await callAI(intelPrompt, 10500, true, "", "claude-haiku-4-5-20251001");
     }catch(e){
       if(e.message==="__TRUNCATED__"){
         // Retry with an explicit compactness instruction, not just a
@@ -1735,7 +1745,7 @@ async function doAnalyze(forceRefresh=false){
         toast("Optimising research length — retrying...", 3000);
         const compactIntelPrompt = intelPrompt +
           "\n\nCRITICAL: Previous attempt was too long and got cut off. Be far more concise — short factual bullet points only, no elaboration, no repeated context. Prioritise: LINEUPS tag, DATA tag, confirmed/predicted XI names, then brief H2H/referee/weather notes. Skip anything non-essential.";
-        intel = await callAI(compactIntelPrompt, 6500, true, "", "claude-haiku-4-5-20251001");
+        intel = await callAI(compactIntelPrompt, 8400, true, "", "claude-haiku-4-5-20251001");
       } else { throw e; }
     }
 
@@ -1953,6 +1963,13 @@ Search 1 → "${t1} lineup vs ${t2} confirmed"
   IMPORTANT: live-score aggregator sites (Sofascore, OneFootball, Flashscore) display lineups as a visual graphic rendered by JavaScript on their match-centre page — this data is NOT accessible through web search even when these domains appear in results, because search only indexes static page text, not the rendered graphic. A Sofascore/OneFootball/Flashscore result that only shows generic team-page or match-preview text (ratings, team rankings, "follow live score") with no actual player names is NOT lineup confirmation — disregard it and search elsewhere. The one exception: if a Sofascore/OneFootball "news" article (not the match-centre page) explicitly writes out player names in prose, that text content IS valid.
   Close to kickoff (within 90 minutes), lineups are almost always publicly available from the news-article sources above or official club social accounts. If you find specific named players in specific positions from ANY credible prose source for THIS match, classify as CONFIRMED even if the source doesn't use the word "official". Prefer the most recently published source (check the article timestamp) if multiple conflicting lineups are found, and treat an explicit "subs include: [Player X]" mention as proof that player is NOT in the starting XI even if an older source listed them as starting.
 
+WHILE RESEARCHING THE LINEUP, ALSO NOTE THE FOLLOWING IF MENTIONED IN ANY SOURCE (don't run separate searches for these — just stay alert for them in the team-news/injury articles you're already reading):
+- Suspension risk: is any key player specifically reported as being one yellow card away from an automatic ban (common phrasing: "booking away from a ban", "suspension risk", "would miss the next match with another yellow")? This is real, checkable information when reported, not speculation.
+- Set-piece responsibility: is a specific player named as the regular corner-taker, free-kick taker, or penalty taker? This is often mentioned in squad-news or "things to watch" style previews.
+- Goalkeeper status: is the team's regular #1 starting, or is a backup/reserve keeper confirmed in instead (due to injury, rotation, or cup-tie squad rules)? If the lineup shows a different name than who you'd expect as the regular starter based on what you find in your research, flag this explicitly — a backup keeper is often a genuine quality drop worth noting.
+- Squad stability: any mention of a player who joined very recently (this transfer window) and may still be settling in, or notable unrest from recent transfer activity (e.g. a key player who handed in a transfer request, contract dispute reports).
+Only report what you actually find — if none of this is mentioned anywhere, that's fine, just don't fabricate it.
+
 Search 2 → "${t1} ${t2} head to head history all meetings referee ${comp}"
   Find: ALL previous meetings between these two teams with results. Named referee and their reputation/stats — if possible, try to spot the referee name in a second source too (e.g. a separate preview article) to corroborate it. Venue and competition context.
 
@@ -1965,6 +1982,15 @@ Search 3 → "${t1} ${t2} stadium venue city ${comp} preview weather odds"
 ${(!xg1||!xg2)?`Search 4 → "${t1} footystats" and "${t2} footystats"
   Real xG and form data is NOT available from our statistical database for this competition (only the top-5 European leagues are covered). FootyStats.org publishes detailed structured statistics for many additional competitions including international tournaments — xG for/against, home/away splits, and recent form are freely visible. Note: their corners and cards breakdowns are paywalled behind a premium subscription and will typically appear as blank/locked on the page — don't spend search effort chasing those two specific fields there, they likely won't be available. Search for each team's FootyStats page and extract: xG For/Against (overall and home/away splits if shown), recent match results with scores, and goals scored/conceded per match. If found, report these as REAL statistical data (not estimates) in your XG INSIGHT section below — this is a genuine upgrade over AI-estimated form when available. If FootyStats doesn't have a page for one or both teams (their own coverage isn't 100% guaranteed for every league), fall back to describing form/goals from the team-news articles found in Search 1.
 `:""}
+
+Search 5 → "${t1} manager" and "${t2} manager" tactics news
+  Find: the HEAD COACH/MANAGER name for each team, and as much as you can establish from real coverage:
+  - Tactical identity: their preferred formation, and a brief descriptor of their style (possession-based, high-press, counter-attacking, direct/long-ball, defensively solid, etc) — this directly informs the tactical matchup reasoning later
+  - Tenure: how long they've been in the current post (e.g. "appointed 3 months ago", "in charge since 2022") — a brand-new appointment carries genuine "new manager bounce" uncertainty that an established tenure doesn't
+  - Experience level: is this their first senior managerial job (rookie/inexperienced) or do they have a substantial track record (veteran)? Note any notable career history if found.
+  - Job security: is there current media speculation about them being under pressure, facing the sack, needing a result to survive, or conversely have they recently received public backing/a new contract? This is a real psychological/motivational factor, not just trivia.
+  - Dressing room sentiment: any reported player unhappiness, training-ground unrest, or anonymous player quotes about the manager — equally, any reporting of strong player support. Only include this if genuinely reported by a real source; do not speculate.
+  If you cannot find a manager's name at all for one or both teams, that's fine — just don't fabricate one. Partial information (e.g. name and formation found, but no tenure detail) is still worth reporting.
 
 AFTER completing all searches, before writing your full report, assess two things based on what you actually found:
 
@@ -2334,6 +2360,55 @@ function buildIntelTab(p,c1,c2){
         <div><div class="lineup-team" style="color:${c2}">${p.team2} (${intel.team2Formation||""})</div>${(intel.team2Lineup||[]).map(pl=>`<div class="lineup-player"><span class="pos-tag" style="background:${c2}18;color:${c2}">${pl.split(":")[0]||""}</span>${pl.split(":")[1]?.trim()||pl}</div>`).join("")}</div>
       </div>
     </div>`;
+  }
+
+  // Coaching / Management
+  if(intel.coaching&&(intel.coaching.team1Coach||intel.coaching.team2Coach)){
+    const mk=(coach,teamName,color)=>{
+      if(!coach||!coach.name)return`<div><div class="lineup-team" style="color:${color}">${teamName}</div><div style="font-size:12px;color:var(--t3);padding:8px 0">No manager intel found</div></div>`;
+      return`<div>
+        <div class="lineup-team" style="color:${color}">${teamName}</div>
+        <div style="font-size:14px;font-weight:700;margin-bottom:6px">${coach.name}</div>
+        <div class="ref-stat"><span class="ref-k">Style</span><span class="ref-v">${coach.tacticalStyle||"—"}</span></div>
+        <div class="ref-stat"><span class="ref-k">Formation</span><span class="ref-v">${coach.formation||"—"}</span></div>
+        <div class="ref-stat"><span class="ref-k">Tenure</span><span class="ref-v">${coach.tenure||"—"}</span></div>
+        <div class="ref-stat"><span class="ref-k">Experience</span><span class="ref-v">${coach.experienceLevel||"—"}</span></div>
+        ${coach.pressureStatus?`<div style="font-size:11px;color:var(--amber);margin-top:8px">${coach.pressureStatus}</div>`:""}
+        ${coach.playerSentiment&&!/no reporting/i.test(coach.playerSentiment)?`<div style="font-size:11px;color:var(--t2);margin-top:4px;font-style:italic">${coach.playerSentiment}</div>`:""}
+      </div>`;
+    };
+    h+=`<div class="card"><div class="sec-ttl"><i class="ti ti-clipboard-list"></i> Management</div>
+      <div class="two-col">
+        ${mk(intel.coaching.team1Coach,p.team1,c1)}
+        ${mk(intel.coaching.team2Coach,p.team2,c2)}
+      </div>
+    </div>`;
+  }
+
+  // Key Player Notes — only renders sections that actually have data
+  const kpn=intel.keyPlayerNotes;
+  if(kpn){
+    const susp=(kpn.suspensionRisk||[]).filter(Boolean);
+    const spt=kpn.setPieceTakers;
+    const hasSPT=spt&&(spt.team1?.corners||spt.team1?.freeKicks||spt.team1?.penalties||spt.team2?.corners||spt.team2?.freeKicks||spt.team2?.penalties);
+    const hasAnyKPN=susp.length||hasSPT||kpn.goalkeeperNote||kpn.squadStability;
+    if(hasAnyKPN){
+      h+=`<div class="card"><div class="sec-ttl"><i class="ti ti-alert-triangle"></i> Key Player Notes</div>`;
+      if(susp.length){
+        h+=`<div style="font-size:11px;font-weight:700;color:var(--t3);letter-spacing:.3px;margin-bottom:4px">SUSPENSION RISK</div>`;
+        susp.forEach(s=>{h+=`<div style="font-size:12px;margin-bottom:6px"><b>${s.player}</b> (${s.team}) — ${s.note}</div>`});
+      }
+      if(hasSPT){
+        h+=`<div style="font-size:11px;font-weight:700;color:var(--t3);letter-spacing:.3px;margin:${susp.length?"10px":"0"} 0 4px">SET-PIECE TAKERS</div>
+        <div class="two-col" style="font-size:12px">
+          <div>${spt.team1?.corners?`<div>Corners: ${spt.team1.corners}</div>`:""}${spt.team1?.freeKicks?`<div>Free kicks: ${spt.team1.freeKicks}</div>`:""}${spt.team1?.penalties?`<div>Penalties: ${spt.team1.penalties}</div>`:""}</div>
+          <div>${spt.team2?.corners?`<div>Corners: ${spt.team2.corners}</div>`:""}${spt.team2?.freeKicks?`<div>Free kicks: ${spt.team2.freeKicks}</div>`:""}${spt.team2?.penalties?`<div>Penalties: ${spt.team2.penalties}</div>`:""}</div>
+        </div>`;
+      }
+      if(kpn.goalkeeperNote)h+=`<div style="font-size:12px;color:var(--amber);margin-top:8px">🧤 ${kpn.goalkeeperNote}</div>`;
+      if(kpn.squadStability)h+=`<div style="font-size:12px;color:var(--t2);margin-top:6px;font-style:italic">${kpn.squadStability}</div>`;
+      h+=`</div>`;
+    }
   }
 
   // Weather + Referee

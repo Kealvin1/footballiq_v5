@@ -963,6 +963,7 @@ STEP 5 — PHYSICAL FACTORS: How do weather, fatigue, and travel affect the game
 STEP 6 — REFEREE INFLUENCE: How does this referee's style affect cards, penalties and match tempo?
 STEP 7 — CORNERS ANALYSIS: Pressing intensity, set piece specialists, defensive shape → corner volume expected?
 STEP 8 — MARKET VALUE: For each key market, compute: implied_probability = 1/odds. Also analyse the 10 additionalMarkets — use xG data for goals markets, HT xG splits for First Half 1X2, referee stats for Penalty, team xGA for Clean Sheet. Compare to your estimated true_probability. Only mark value=true when edge = (true_prob - implied_prob) / implied_prob > 0.05 (5%+ edge). Show the calculation. This prevents false value flags.
+STEP 9 — DEVIL'S ADVOCATE: Before finalising your main prediction, briefly construct the strongest realistic case for the OPPOSITE outcome (if you're leaning toward a home win, genuinely consider what would need to be true for an away win or draw instead). If this counter-case reveals a real weakness in your initial lean, adjust your confidence downward accordingly — do not just acknowledge the counter-case and then ignore it. This step exists specifically to catch overconfidence from anchoring on the first plausible conclusion.
 
 After reasoning, output ONLY a valid JSON object (NO markdown, NO code fences (no backticks), NO comments, NO trailing commas. Start your response with { and end with }. Precise confidence values like 63, 71, 58 — never multiples of 5. Keep "reasoning" under 12 words, "chainOfThought" under 80 words):
 {
@@ -1545,6 +1546,116 @@ function richnessBorder(r){
   return r==="rich"?"var(--em-b)":r==="limited"?"var(--amr-b)":"rgba(255,77,106,0.22)";
 }
 
+
+// ── CROSS-VALIDATE VALUE BETS — recompute edge from the AI's own stated
+// odds/trueOdds rather than trusting its arithmetic. This catches a known
+// LLM failure mode (internally inconsistent numbers) with zero extra API
+// calls — pure deterministic math, applied after parsing. Protects against
+// a false "value" flag the user might actually stake money on.
+function validateAndCorrectEdges(p){
+  if(!Array.isArray(p.valueBets))return p;
+  const corrected=[];
+  for(const vb of p.valueBets){
+    if(!vb||!vb.odds||!vb.trueOdds){corrected.push(vb);continue} // can't verify, leave as-is
+    const impliedProb=1/vb.odds;
+    const trueProb=1/vb.trueOdds;
+    const recomputedEdge=Math.round(((trueProb-impliedProb)/impliedProb)*100);
+    if(recomputedEdge<3){
+      // Recomputed edge doesn't actually clear even the most lenient
+      // threshold (3% floor) — this would be a false positive, drop it.
+      console.warn(`Value bet dropped after cross-validation: "${vb.market}" — stated edge ${vb.edge}%, recomputed ${recomputedEdge}%`);
+      continue;
+    }
+    if(Math.abs((vb.edge||0)-recomputedEdge)>3){
+      // Meaningful mismatch between stated and recomputed edge — correct
+      // the displayed number to the mathematically accurate one.
+      console.warn(`Value bet edge corrected: "${vb.market}" — stated ${vb.edge}%, recomputed ${recomputedEdge}%`);
+      corrected.push({...vb,edge:recomputedEdge,_edgeCorrected:true});
+    }else{
+      corrected.push(vb);
+    }
+  }
+  p.valueBets=corrected;
+
+  // Same logic for additionalMarkets entries flagged value:true that also
+  // happen to carry odds/trueOdds (most don't, but defensive either way).
+  if(Array.isArray(p.additionalMarkets)){
+    p.additionalMarkets=p.additionalMarkets.map(m=>{
+      if(!m||!m.value||!m.odds||!m.trueOdds)return m;
+      const impliedProb=1/m.odds, trueProb=1/m.trueOdds;
+      const recomputedEdge=Math.round(((trueProb-impliedProb)/impliedProb)*100);
+      if(recomputedEdge<3)return{...m,value:false};
+      return m;
+    });
+  }
+
+  // Secondary, non-intrusive sanity check: does the AI's per-match
+  // expectedGoals wildly diverge from the real fetched season-average xG?
+  // Per-match context CAN legitimately differ from season average, so this
+  // only logs for monitoring — it never silently rewrites the AI's number.
+  if(p.expectedGoals&&p._realXG1&&p._realXG2){
+    const t1Diff=Math.abs((p.expectedGoals.team1||0)-(+p._realXG1.avg_xGF||0));
+    const t2Diff=Math.abs((p.expectedGoals.team2||0)-(+p._realXG2.avg_xGF||0));
+    if(t1Diff>1.0)console.warn(`expectedGoals.team1 (${p.expectedGoals.team1}) diverges substantially from real season xG (${p._realXG1.avg_xGF}) — may reflect genuine match-specific context, or a model error.`);
+    if(t2Diff>1.0)console.warn(`expectedGoals.team2 (${p.expectedGoals.team2}) diverges substantially from real season xG (${p._realXG2.avg_xGF}) — may reflect genuine match-specific context, or a model error.`);
+  }
+
+  return p;
+}
+
+
+// ── SELF-CONSISTENCY CHECK — for genuinely close matches only (where a
+// single pass is least reliable), run a brief independent second read of
+// win probabilities and compare. This is strictly additive: ANY failure
+// here (network, parsing, anything) is silently swallowed and the
+// original result is used completely unchanged — it can only ever soften
+// confidence on close matches, never break the main analysis flow.
+async function selfConsistencyCheck(p, t1, t2, comp, intel, tier, richness){
+  try{
+    const wp=p.winProbabilities;
+    if(!wp)return p;
+    const sorted=[wp.team1||0,wp.draw||0,wp.team2||0].sort((a,b)=>b-a);
+    const gap=sorted[0]-sorted[1]; // gap between top and second outcome
+    if(gap>=12)return p; // not a close match — skip, no extra cost/latency
+
+    const checkPrompt=`Quick independent cross-check for ${t1} vs ${t2} (${comp}).
+Based on this same context:
+${intel.slice(0,3000)}
+
+What are your win probabilities for ${t1} (home/team1) vs Draw vs ${t2} (away/team2)? Give your own independent read — don't just repeat round numbers. Return ONLY this JSON, nothing else:
+{"team1":NN,"draw":NN,"team2":NN}`;
+
+    const raw=await callAI(checkPrompt,300,false,"",  "claude-sonnet-4-6", 0.2);
+    const check=parseJSON(raw);
+    if(!check||typeof check.team1!=="number")return p;
+
+    const checkSorted=[check.team1||0,check.draw||0,check.team2||0];
+    const mainSorted=[wp.team1||0,wp.draw||0,wp.team2||0];
+    const maxDiff=Math.max(...mainSorted.map((v,i)=>Math.abs(v-checkSorted[i])));
+
+    if(maxDiff>15){
+      // Genuine divergence between two independent reads — this IS useful
+      // signal (the playbook already treats "no clear signal" matches as a
+      // red flag), so soften confidence and blend the two probability reads
+      // rather than fully trusting either one alone.
+      console.warn(`Self-consistency check found divergence on ${t1} vs ${t2}: main=${JSON.stringify(wp)}, check=${JSON.stringify(check)}`);
+      p.winProbabilities={
+        team1:Math.round((wp.team1+check.team1)/2),
+        draw:Math.round((wp.draw+check.draw)/2),
+        team2:Math.round((wp.team2+check.team2)/2),
+      };
+      if(p.mainPrediction&&typeof p.mainPrediction.confidence==="number"){
+        p.mainPrediction.confidence=Math.max(35,p.mainPrediction.confidence-10);
+      }
+      p._consistencyFlag=true;
+    }
+    return p;
+  }catch(e){
+    console.warn("Self-consistency check skipped (non-fatal):",e.message);
+    return p; // always fall back to the original, unmodified result
+  }
+}
+
 let _curCacheKey=""; // track so Refresh button can clear it
 async function doAnalyze(forceRefresh=false){
   const t1=$("t1").value.trim(),t2=$("t2").value.trim(),comp=$("comp").value;
@@ -1678,6 +1789,9 @@ async function doAnalyze(forceRefresh=false){
     // since reached the actual tournament, which can otherwise leak
     // into a mislabeled competition name despite correct user input.
     p.competition = comp;
+    p._realXG1 = xg1; p._realXG2 = xg2; // stash for the sanity-check above
+    p = validateAndCorrectEdges(p);
+    p = await selfConsistencyCheck(p, t1, t2, comp, intel, _tier, dataRichness);
     p._liveOdds = liveOdds?matchToTeam(liveOdds,t1,t2):null;
     p._movement = lineMovement;
     p._lineupStatus = lineupStatus;
@@ -1834,7 +1948,11 @@ Search 2b (if referee not found above) → "${t1} ${t2} referee 2026 World Cup a
 Search 3 → "${t1} ${t2} stadium venue city ${comp} preview weather odds"
   Find: The ACTUAL confirmed venue/stadium and city for this specific match first — do not assume it is either team's home ground unless confirmed. Then find weather forecast at that real venue, competition context, current market odds, any line movement or sharp money signals.
 
-AFTER completing all 3 searches, before writing your full report, assess two things based on what you actually found:
+${(!xg1||!xg2)?`Search 4 → "${t1} footystats" and "${t2} footystats"
+  Real xG and form data is NOT available from our statistical database for this competition (only the top-5 European leagues are covered). FootyStats.org publishes detailed structured statistics for many additional competitions including international tournaments — xG for/against, home/away splits, and recent form are freely visible. Note: their corners and cards breakdowns are paywalled behind a premium subscription and will typically appear as blank/locked on the page — don't spend search effort chasing those two specific fields there, they likely won't be available. Search for each team's FootyStats page and extract: xG For/Against (overall and home/away splits if shown), recent match results with scores, and goals scored/conceded per match. If found, report these as REAL statistical data (not estimates) in your XG INSIGHT section below — this is a genuine upgrade over AI-estimated form when available. If FootyStats doesn't have a page for one or both teams (their own coverage isn't 100% guaranteed for every league), fall back to describing form/goals from the team-news articles found in Search 1.
+`:""}
+
+AFTER completing all searches, before writing your full report, assess two things based on what you actually found:
 
 (1) LINEUP STATUS — cross-reference against multiple sources before declaring full confirmation:
 After your searches, check whether the SAME starting XI (same 11 names, or at minimum the same key players in the same roles) appears in MORE THAN ONE independent source — two different articles, an article plus a club social media post, etc. (two articles that are clearly just syndicating/copying the exact same wire-service text do NOT count as two independent sources — look for genuinely separate reporting).

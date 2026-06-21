@@ -1590,7 +1590,7 @@ async function doAnalyze(forceRefresh=false){
       // verification, referee neutrality, weather, stakes language, form
       // priority, rotation, on top of lineup/injury corroboration) and
       // needs more room to complete without truncating.
-      intel = await callAI(intelPrompt, 6000, true, "", "claude-haiku-4-5-20251001");
+      intel = await callAI(intelPrompt, 8000, true, "", "claude-haiku-4-5-20251001");
     }catch(e){
       if(e.message==="__TRUNCATED__"){
         // Retry with an explicit compactness instruction, not just a
@@ -1600,7 +1600,7 @@ async function doAnalyze(forceRefresh=false){
         toast("Optimising research length — retrying...", 3000);
         const compactIntelPrompt = intelPrompt +
           "\n\nCRITICAL: Previous attempt was too long and got cut off. Be far more concise — short factual bullet points only, no elaboration, no repeated context. Prioritise: LINEUPS tag, DATA tag, confirmed/predicted XI names, then brief H2H/referee/weather notes. Skip anything non-essential.";
-        intel = await callAI(compactIntelPrompt, 5000, true, "", "claude-haiku-4-5-20251001");
+        intel = await callAI(compactIntelPrompt, 6500, true, "", "claude-haiku-4-5-20251001");
       } else { throw e; }
     }
 
@@ -1630,7 +1630,7 @@ async function doAnalyze(forceRefresh=false){
     const _staticBlock={type:"text",text:PHASE2_STATIC_PROMPT,cache_control:{type:"ephemeral"}};
     let rawAnalysis;
     try{
-      rawAnalysis = await callAI([_staticBlock,{type:"text",text:analysisPrompt}], 8192, false, ANALYST_SYSTEM);
+      rawAnalysis = await callAI([_staticBlock,{type:"text",text:analysisPrompt}], 12000, false, ANALYST_SYSTEM);
     }catch(e){
       if(e.message==="__TRUNCATED__"){
         // Response was cut off — retry asking for more compact output
@@ -1639,7 +1639,7 @@ async function doAnalyze(forceRefresh=false){
           "\n\nCRITICAL: Previous attempt was too long and got cut off. "+
           "Be extremely concise. Limit reasoning fields to 8 words max. "+
           "Skip oddsComparison array entirely (use []). Output valid complete JSON under 6000 tokens.";
-        rawAnalysis = await callAI([_staticBlock,{type:"text",text:retryDynamic}], 8192, false, ANALYST_SYSTEM);
+        rawAnalysis = await callAI([_staticBlock,{type:"text",text:retryDynamic}], 12000, false, ANALYST_SYSTEM);
       } else { throw e; }
     }
 

@@ -1810,8 +1810,8 @@ Search 2 → "${t1} ${t2} head to head history all meetings referee ${comp}"
 Search 2b (if referee not found above) → "${t1} ${t2} referee 2026 World Cup appointed"
   Find: Who is refereeing this specific match and their known tendencies.
 
-Search 3 → "${t1} ${t2} preview weather odds ${comp}"
-  Find: Weather forecast at venue, competition context, current market odds, any line movement or sharp money signals.
+Search 3 → "${t1} ${t2} stadium venue city ${comp} preview weather odds"
+  Find: The ACTUAL confirmed venue/stadium and city for this specific match first — do not assume it is either team's home ground unless confirmed. Then find weather forecast at that real venue, competition context, current market odds, any line movement or sharp money signals.
 
 AFTER completing all 3 searches, before writing your full report, assess two things based on what you actually found:
 
@@ -1829,6 +1829,24 @@ For each significant injury/availability claim that materially affects your anal
 NOTE ON HISTORICAL FACTS: Head-to-head results, recent match scores, and league standings are SETTLED PUBLIC RECORD — these are not predictions and rarely genuinely disputed between sources, so single-source reporting is normally fine for these (unless you notice an actual numeric discrepancy between sources, in which case prefer the more recent or more reputable one and note the uncertainty). The 2-source corroboration requirement above applies specifically to near-term, changeable, prediction-like facts — lineups, injuries, and referee assignment — not to historical scorelines.
 
 IMPORTANT CONTEXTUAL CORRECTION — TOURNAMENT PHASE vs QUALIFYING PHASE: confederation-mixing (e.g. a CONMEBOL nation playing a CONCACAF nation) is COMPLETELY NORMAL and EXPECTED once a competition reaches its actual TOURNAMENT/GROUP STAGE — this is the entire point of a World Cup, AFCON, or similar event: bringing together teams that already qualified through their own separate confederations into shared groups. This is fundamentally different from QUALIFYING, where confederations remain separate. If team names, dates, and context all point to teams playing in the same group of an active major tournament, treat this as a completely normal, well-covered fixture — do NOT treat a cross-confederation pairing itself as evidence of an unusual, suspicious, or poorly-documented match. Real, fully confirmed lineups with squad numbers, broadcast details, and betting markets are routinely available for EVERY group-stage match of a major tournament, regardless of which confederations the two teams originally qualified through. Do not let confederation-mixing alone lower your Data Richness assessment below what the actual evidence you found supports.
+
+CRITICAL VENUE RULE — DO NOT CONFUSE TOURNAMENT VENUES WITH A TEAM'S DOMESTIC STADIUM: during QUALIFYING, teams genuinely play home matches at their own domestic stadium with real home-field advantage (crowd, altitude, travel for the opponent). During the actual TOURNAMENT/FINALS phase, this is almost always FALSE — major tournaments are played at venues in the HOST NATION(S) only, not at any individual participating team's home ground, even if that team is one of the two playing. For World Cup 2026 specifically, the tournament is co-hosted by the USA, Mexico, and Canada — EVERY match takes place at a stadium in one of these three countries, regardless of which two teams are playing, UNLESS one of those two teams is itself the USA, Mexico, or Canada (in which case they may have a true home-crowd advantage, but never an altitude or stadium-identity advantage tied to their own non-host domestic ground). Search for the ACTUAL host-nation venue and city for this specific match rather than defaulting to either team's home stadium. Do not apply "home advantage", "altitude advantage", or "playing at home" reasoning for a tournament match unless you have specifically confirmed the match venue is that team's own domestic ground — for World Cup 2026 this is only possible for USA, Mexico, or Canada matches.
+
+VERIFY THE VENUE EXISTS IN THE TEAMS' VENUE ENVIRONMENT: if you cannot find a specific confirmed venue/city for this exact match through search, do NOT assume or default to either team's domestic stadium — state the venue as "TBC — neutral host-nation venue" rather than naming a specific stadium you have not actually confirmed via search, and do not build "altitude" or "home advantage" reasoning around an unconfirmed assumed venue.
+
+FOUR MORE DIMENSIONS THAT FOLLOW THE SAME TOURNAMENT-PHASE LOGIC — apply this same qualifying-vs-tournament distinction consistently across the entire analysis, not just the venue:
+
+(a) REFEREE: during qualifying, referees are often appointed from within the same confederation as the teams. During the actual tournament, FIFA (or the relevant continental body) appoints referees from a GLOBAL pool, frequently deliberately choosing a referee from a DIFFERENT confederation than either competing team, specifically to ensure neutrality. Do not assume or search only for referees matching either team's own confederation.
+
+(b) WEATHER: must reflect conditions at the REAL confirmed host-nation venue (per the venue rule above), never either team's home-country climate. A Quito-based weather assumption for a USA/Mexico/Canada-hosted World Cup 2026 match would be wrong for the same reason the venue itself would be wrong.
+
+(c) STAKES AND CONTEXT LANGUAGE: once a team has reached the actual tournament, the stakes are about ADVANCING within it (winning the group, progressing past the knockout round) — NOT about "qualifying for" or "reaching" the tournament itself, since that already happened. Avoid phrases like "must win to reach the World Cup" for a team already playing in it; use "must win to advance" or "must win to top the group" instead.
+
+(d) RECENT FORM PRIORITY: when assessing current form, give more weight to matches THIS team has already played in the CURRENT tournament (if any) over older qualifying-campaign results — tournament form is fresher, more predictive of immediate tactical state, and reflects fitness/morale/adjustments specific to this event. Only fall back to qualifying-era form if no tournament matches have been played yet.
+
+(e) SQUAD ROTATION: tournament matches are tightly clustered (typically every 3-4 days) unlike qualifying fixtures spread over months. If this team played a tournament match within the last few days, factor in realistic rotation and fatigue management — this is a genuine tactical consideration that does not apply to widely-spaced qualifying matches.
+
+SCOPE: this entire tournament-phase correction (venue, referee, weather, stakes language, form priority, rotation) applies to INTERNATIONAL tournaments with a designated host nation — World Cup, AFCON, Euros, Copa América, Nations League finals. It does NOT apply to club competitions like the Champions League or Europa League, where teams genuinely do play home/away legs at their own real stadiums throughout the group and knockout rounds (only a one-off final is at a neutral pre-selected venue).
 
 (2) DATA RICHNESS FOR THIS SPECIFIC MATCHUP — assess ALL four factors independently:
 
@@ -2393,10 +2411,16 @@ async function fetchFixtures(){
   const comp=$("fix-comp").value,when=$("fix-when").value;
   $("fix-btn").disabled=true;show("fix-loading");txt("fix-ld-sub",`${comp} · ${when}`);html("fix-results","");
   const today=new Date().toISOString().split("T")[0];
-  const prompt=`Search for upcoming ${comp} football fixtures scheduled for ${when} (around ${today}).
+  const todayReadable=new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
+  const prompt=`Today's real date is ${todayReadable} (${today}). Search for ${comp} football fixtures scheduled for ${when}, relative to this actual current date.
+
+IMPORTANT: if ${comp} is a major tournament currently in progress (World Cup, AFCON, Euros, Champions League, etc), treat it as a normal, very well-documented, heavily-covered competition with daily fixtures and full media coverage — do NOT be unduly cautious about whether matches exist or are well-covered just because this is later than your training data might suggest. Major tournaments publish their full schedules far in advance and these are searchable from many sources (official tournament site, ESPN, BBC Sport, FIFA.com, Google's sports schedule widget, etc).
+
+SEARCH STRATEGY: try a direct query like "${comp} schedule fixtures ${when}" or "${comp} matches this week schedule". If that doesn't surface a clear list, try the official competition name plus "fixtures" and the specific date range.
+
 Return ONLY valid JSON (no markdown, no code fences, no trailing commas):
 {"competition":"${comp}","date":"${when}","fixtures":[{"home":"Team A","away":"Team B","time":"20:00","venue":"Stadium","round":"Round 1"}]}
-List at most the 15 most relevant real fixtures found, ordered by date. Return empty array if none. Do not invent matches.`;
+List at most the 15 most relevant real fixtures found, ordered by date. It is fine to include a fixture even if one minor field (e.g. exact kickoff time or venue) is uncertain — use your best estimate rather than omitting the whole fixture. Only return an empty array if you are confident there are genuinely no fixtures in this competition during this window — not simply because you're unsure. Do not invent fixtures between teams or on dates you have no search evidence for.`;
   try{
     let raw;
     try{

@@ -1176,7 +1176,16 @@ function toast(msg,ms=2400){const t=$("toast");t.textContent=msg;t.classList.rem
 async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="claude-sonnet-4-6"){
   const key=getApiKey();
   if(!key){toast("⚠ Add API key in Settings ⚙");throw new Error("No API key configured.")}
-  const body={model,max_tokens:tokens,messages:[{role:"user",content:prompt}]};
+  // temperature:0 — every call in this app is analytical/fact-grounded
+  // (predictions, research, JSON repair), never creative writing, so there's
+  // no real downside to the most deterministic setting available. Judgment
+  // quality comes from the reasoning instructions and the actual facts fed
+  // in, not from sampling randomness. Note: temperature 0 reduces noise as
+  // much as technically possible, but doesn't guarantee bit-identical output
+  // (distributed inference has some residual floating-point variation), and
+  // genuine differences from fresh search results or moved odds still flow
+  // through normally, since those are different input text, not noise.
+  const body={model,max_tokens:tokens,temperature:0,messages:[{role:"user",content:prompt}]};
   if(useSearch)body.tools=[{type:"web_search_20250305",name:"web_search"}];
   if(systemPrompt)body.system=systemPrompt;
   const controller=new AbortController();

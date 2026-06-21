@@ -1275,7 +1275,7 @@ function parseJSON(raw){
 // ── NETLIFY FUNCTION CALLS ─────────────────────────────────────────
 async function fetchXGData(team, comp){
   try{
-    const r=await fetch(`/.netlify/functions/xg?team=${encodeURIComponent(team)}&competition=${encodeURIComponent(comp)}`);
+    const r=await fetch(`/api/xg?team=${encodeURIComponent(team)}&competition=${encodeURIComponent(comp)}`);
     if(!r.ok)return null;
     const d=await r.json();
     return d.success?d.data:null;
@@ -1285,16 +1285,27 @@ async function fetchXGData(team, comp){
 async function fetchRefereeStats(name, comp){
   if(!name||name.length<4)return null;
   try{
-    const r=await fetch(`/.netlify/functions/referee?name=${encodeURIComponent(name)}&competition=${encodeURIComponent(comp)}`);
+    const r=await fetch(`/api/referee?name=${encodeURIComponent(name)}&competition=${encodeURIComponent(comp)}`);
     if(!r.ok)return null;
     const d=await r.json();
     return d.success?d.data:null;
   }catch{return null}
 }
 
+async function fetchTeamCornerStats(t1, t2, comp){
+  // Reuses the existing referee.js/api endpoint in its new team1+team2 mode —
+  // shares the same already-proven CSV fetch infrastructure, no new dependency.
+  try{
+    const r=await fetch(`/api/referee?team1=${encodeURIComponent(t1)}&team2=${encodeURIComponent(t2)}&competition=${encodeURIComponent(comp)}`);
+    if(!r.ok)return null;
+    const d=await r.json();
+    return d.success?{team1:d.team1,team2:d.team2}:null;
+  }catch{return null}
+}
+
 async function fetchLiveOddsProxy(comp){
   try{
-    const r=await fetch(`/.netlify/functions/odds?competition=${encodeURIComponent(comp)}`);
+    const r=await fetch(`/api/odds?competition=${encodeURIComponent(comp)}`);
     if(!r.ok)return null;
     const d=await r.json();
     return d.success?{games:d.games,movement:d.movement}:null;
@@ -1682,10 +1693,11 @@ async function doAnalyze(forceRefresh=false){
     advanceSteps(0);
 
     // allSettled: one failed fetch won't kill the analysis
-    const [xg1res, xg2res, oddsRes] = await Promise.allSettled([
+    const [xg1res, xg2res, oddsRes, cornersRes] = await Promise.allSettled([
       fetchXGData(t1, comp),
       fetchXGData(t2, comp),
       fetchLiveOddsProxy(comp),
+      fetchTeamCornerStats(t1, t2, comp),
     ]);
 
     // Done with Phase 0
@@ -1695,10 +1707,11 @@ async function doAnalyze(forceRefresh=false){
     const oddsProxy = oddsRes.status==="fulfilled" ? oddsRes.value : null;
     const liveOdds = oddsProxy?.games || null;
     const lineMovement = oddsProxy?.movement || null;
+    const cornerStats = cornersRes.status==="fulfilled" ? cornersRes.value : null;
 
     // Log what we got
     console.log("Real data loaded:",
-      {xg1_ok:!!xg1, xg2_ok:!!xg2, odds_ok:!!liveOdds, movement_ok:!!lineMovement});
+      {xg1_ok:!!xg1, xg2_ok:!!xg2, odds_ok:!!liveOdds, movement_ok:!!lineMovement, corners_ok:!!cornerStats});
 
     // ── PHASE 1: Intelligence gathering ──────────────────────────
     setPhase(1);curStep=0;renderSteps(0,1);
@@ -1743,7 +1756,7 @@ async function doAnalyze(forceRefresh=false){
 
     const _tier=getCompTier(comp);
     const _richness=detectDataRichness(intel);
-    const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,_tier,_richness);
+    const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,_tier,_richness,cornerStats);
     // Static methodology+schema block is identical on every Phase 2 call —
     // marking it cacheable saves ~90% on this ~2300-token block for any
     // repeat call within the cache window (e.g. retries, or scouting
@@ -2087,7 +2100,7 @@ self-calibrate to real-world accuracy over time.
 `;
 }
 
-function buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,tier,richness){
+function buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,tier,richness,cornerStats){
   // NOTE: this now returns only the DYNAMIC, per-match portion of the
   // Phase 2 prompt. The static methodology + JSON schema (PHASE2_STATIC_PROMPT)
   // is sent as a separate, cached content block — see callAI's array-content
@@ -2115,6 +2128,12 @@ Penalty rate: ${refStats.penalties_per_game} per game
 Home win rate in their matches: ${refStats.home_win_rate}%
 Profile: ${refStats.personality}
 === END REFEREE DATA ===`:""}
+
+${cornerStats&&(cornerStats.team1||cornerStats.team2)?`=== REAL CORNER STATISTICS (football-data.co.uk, this season + last) ===
+${cornerStats.team1?`${t1}: ${cornerStats.team1.corners_for_per_game} corners for / ${cornerStats.team1.corners_against_per_game} against per game (${cornerStats.team1.matches} matches)${cornerStats.team1.home_corners_for!=null?` — at home: ${cornerStats.team1.home_corners_for} for / ${cornerStats.team1.home_corners_against} against`:""}`:`${t1}: no real corner data available`}
+${cornerStats.team2?`${t2}: ${cornerStats.team2.corners_for_per_game} corners for / ${cornerStats.team2.corners_against_per_game} against per game (${cornerStats.team2.matches} matches)${cornerStats.team2.away_corners_for!=null?` — away: ${cornerStats.team2.away_corners_for} for / ${cornerStats.team2.away_corners_against} against`:""}`:`${t2}: no real corner data available`}
+Use this REAL data (not estimates) to ground your cornerMarkets predictions — this is a genuine statistical upgrade over AI-estimated corner volume when available.
+=== END CORNER DATA ===`:""}
 
 ${xg1&&xg2?`=== KEY xG INSIGHT FOR ANALYSIS ===
 ${t1} playing HOME this match → use their HOME stats: ${xg1.home_avg_xGF} xGF / ${xg1.home_avg_xGA} xGA

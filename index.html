@@ -1433,7 +1433,7 @@ function quickSaveMarket(arrName,idx){
 function quickSaveVB(idx){
   if(!curPred)return;
   const p=curPred;
-  const allVB=[...(p.valueBets||[]),...(p.additionalMarkets||[]).filter(m=>m&&m.value)];
+  const allVB=[...(p.valueBets||[]).filter(Boolean),...(p.additionalMarkets||[]).filter(m=>m&&m.value)];
   const vb=allVB[idx];
   if(!vb)return;
   const hist=getLS(LS.HIST,[]);
@@ -1567,7 +1567,8 @@ function validateAndCorrectEdges(p){
   if(!Array.isArray(p.valueBets))return p;
   const corrected=[];
   for(const vb of p.valueBets){
-    if(!vb||!vb.odds||!vb.trueOdds){corrected.push(vb);continue} // can't verify, leave as-is
+    if(!vb)continue; // drop null/falsy entries entirely — never let them reach the renderer
+    if(!vb.odds||!vb.trueOdds){corrected.push(vb);continue} // can't verify the math, but it's a real object — leave as-is
     const impliedProb=1/vb.odds;
     const trueProb=1/vb.trueOdds;
     const recomputedEdge=Math.round(((trueProb-impliedProb)/impliedProb)*100);
@@ -2209,7 +2210,7 @@ function buildAllTabs(p,c1,c2){
   if(p.keyFactors?.length){
     ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-list-check"></i> Key factors</div><div class="factors">${(p.keyFactors||[]).map((f,i)=>`<div class="factor"><span class="fnum">${i+1}</span><p>${f}</p></div>`).join("")}</div></div>`;
   }
-  const _allVB=[...(p.valueBets||[]),...(p.additionalMarkets||[]).filter(m=>m&&m.value)];
+  const _allVB=[...(p.valueBets||[]).filter(Boolean),...(p.additionalMarkets||[]).filter(m=>m&&m.value)];
   if(_allVB.length){
     ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-diamond"></i> Value bets</div>${_allVB.map((vb,idx)=>`
       <div class="vbet"><div class="vbet-hdr"><div><div class="vbet-mkt">${vb.market}</div><div class="vbet-pick">${vb.pick}</div></div>

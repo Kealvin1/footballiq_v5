@@ -1173,19 +1173,20 @@ let toastTmr;
 function toast(msg,ms=2400){const t=$("toast");t.textContent=msg;t.classList.remove("hidden");clearTimeout(toastTmr);toastTmr=setTimeout(()=>t.classList.add("hidden"),ms)}
 
 // ── API ──
-async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="claude-sonnet-4-6"){
+async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="claude-sonnet-4-6",temperature=0){
   const key=getApiKey();
   if(!key){toast("⚠ Add API key in Settings ⚙");throw new Error("No API key configured.")}
-  // temperature:0 — every call in this app is analytical/fact-grounded
-  // (predictions, research, JSON repair), never creative writing, so there's
-  // no real downside to the most deterministic setting available. Judgment
-  // quality comes from the reasoning instructions and the actual facts fed
-  // in, not from sampling randomness. Note: temperature 0 reduces noise as
-  // much as technically possible, but doesn't guarantee bit-identical output
-  // (distributed inference has some residual floating-point variation), and
-  // genuine differences from fresh search results or moved odds still flow
-  // through normally, since those are different input text, not noise.
-  const body={model,max_tokens:tokens,temperature:0,messages:[{role:"user",content:prompt}]};
+  // temperature defaults to 0 (fully deterministic) — appropriate for
+  // fact-retrieval calls (Phase 1 research, JSON repair, fixtures search)
+  // where there's no benefit to sampling randomness. Phase 2 explicitly
+  // overrides this to 0.3 at its call site, since genuine analytical
+  // judgment (weighing tactical factors, probability estimation) benefits
+  // from a touch of flexibility, without going high enough to reintroduce
+  // noise-driven inconsistency. Note: even at 0, output isn't perfectly
+  // bit-identical (distributed inference has residual floating-point
+  // variation), and genuine differences from fresh search results or moved
+  // odds still flow through normally regardless of this setting.
+  const body={model,max_tokens:tokens,temperature,messages:[{role:"user",content:prompt}]};
   if(useSearch)body.tools=[{type:"web_search_20250305",name:"web_search"}];
   if(systemPrompt)body.system=systemPrompt;
   const controller=new AbortController();
@@ -1639,7 +1640,7 @@ async function doAnalyze(forceRefresh=false){
     const _staticBlock={type:"text",text:PHASE2_STATIC_PROMPT,cache_control:{type:"ephemeral"}};
     let rawAnalysis;
     try{
-      rawAnalysis = await callAI([_staticBlock,{type:"text",text:analysisPrompt}], 12000, false, ANALYST_SYSTEM);
+      rawAnalysis = await callAI([_staticBlock,{type:"text",text:analysisPrompt}], 12000, false, ANALYST_SYSTEM, "claude-sonnet-4-6", 0.3);
     }catch(e){
       if(e.message==="__TRUNCATED__"){
         // Response was cut off — retry asking for more compact output
@@ -1648,7 +1649,7 @@ async function doAnalyze(forceRefresh=false){
           "\n\nCRITICAL: Previous attempt was too long and got cut off. "+
           "Be extremely concise. Limit reasoning fields to 8 words max. "+
           "Skip oddsComparison array entirely (use []). Output valid complete JSON under 6000 tokens.";
-        rawAnalysis = await callAI([_staticBlock,{type:"text",text:retryDynamic}], 12000, false, ANALYST_SYSTEM);
+        rawAnalysis = await callAI([_staticBlock,{type:"text",text:retryDynamic}], 12000, false, ANALYST_SYSTEM, "claude-sonnet-4-6", 0.3);
       } else { throw e; }
     }
 

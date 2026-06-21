@@ -501,7 +501,7 @@ select option{background:var(--card2)}
 .weather-icon{font-size:26px}.weather-vals{font-size:13px;font-weight:700}.weather-sub{font-size:11px;color:var(--t2);margin-top:1px}
 .ref-stat{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px}
 .ref-stat:last-child{border-bottom:none}
-.ref-k{color:var(--t2);font-weight:500}.ref-v{font-weight:700}
+.ref-k{color:var(--t2);font-weight:500;flex-shrink:0;white-space:nowrap;margin-right:10px}.ref-v{font-weight:700;text-align:right}
 .xg-bar-wrap{margin-bottom:10px}
 .xg-label{display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-bottom:5px}
 .xg-track{height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden}
@@ -1433,12 +1433,23 @@ function quickSaveMarket(arrName,idx){
   const arr=p[arrName]||[];
   const m=arr[idx];
   if(!m)return;
+  // Different array types use different field names — normalize so every
+  // tab (Markets, Corners & Cards, Scores, Scorers) saves a sensible
+  // market/pick label instead of "undefined: undefined".
+  let market,pick,confidence;
+  if(arrName==="correctScorePredictions"){
+    market="Correct Score";pick=m.score;confidence=m.probability!=null?m.probability:null;
+  }else if(arrName==="goalscorers"){
+    market="Anytime Goalscorer";pick=`${m.player}${m.team?` (${m.team})`:""}`;confidence=m.probability!=null?m.probability:null;
+  }else{
+    market=m.market||"Market";pick=m.pick||"";confidence=m.confidence!=null?m.confidence:null;
+  }
   const hist=getLS(LS.HIST,[]);
   hist.unshift({id:Date.now()+"",addedAt:new Date().toISOString(),team1:p.team1,team2:p.team2,competition:p.competition,
-    pick:`${m.market||"Market"}: ${m.pick||""}`,market:m.market||"Market",odds:m.odds,
-    confidence:m.confidence!=null?m.confidence:null,status:"pending"});
+    pick:`${market}: ${pick}`,market:market,odds:m.odds,
+    confidence:confidence,status:"pending"});
   setLS(LS.HIST,hist);
-  toast(`Tracking: ${m.pick||"bet"} ✓`);
+  toast(`Tracking: ${pick||"bet"} ✓`);
 }
 function quickSaveVB(idx){
   if(!curPred)return;
@@ -2305,16 +2316,18 @@ function buildAllTabs(p,c1,c2){
       <span class="s-rank">${i+1}</span><span class="s-val">${s.score}</span>
       <div style="flex:1">${confBarNoLabel(Math.min(s.probability*3.5,100),i===0?GREEN:GRAY)}</div>
       <span class="s-pct">${s.probability}%</span><span class="s-odds">${s.odds}</span>
+      <button class="btn-sm" style="margin-left:6px;padding:4px 7px" title="Track this bet" onclick="quickSaveMarket('correctScorePredictions',${i})"><i class="ti ti-bookmark"></i></button>
     </div>`).join("")}</div>`);
 
   // GOALSCORERS
   const gs=[...(p.goalscorers||[])].filter(Boolean).sort((a,b)=>b.probability-a.probability);
-  html("tc-players",`<p style="font-size:13px;color:var(--t2);margin-bottom:14px">Anytime goalscorer probabilities.</p><div class="sc-list">${gs.map(g=>{
+  html("tc-players",`<p style="font-size:13px;color:var(--t2);margin-bottom:14px">Anytime goalscorer probabilities.</p><div class="sc-list">${gs.map((g,i)=>{
     const gc=g.team===p.team1?c1:c2;
     return`<div class="sc-card">
       <div class="sc-icon" style="background:${gc}18;color:${gc}"><i class="ti ti-run"></i></div>
       <div style="flex:1"><div class="sc-name">${g.player}</div><div class="sc-meta">${g.team} · ${g.role}</div>${confBarNoLabel(g.probability,gc)}</div>
       <div class="sc-right"><div class="sc-odds" style="color:${gc};background:${gc}18">${g.odds}</div><div class="sc-prob">${g.probability}% likely</div></div>
+      <button class="btn-sm" style="margin-left:6px;padding:4px 7px;align-self:center" title="Track this bet" onclick="quickSaveMarket('goalscorers',${i})"><i class="ti ti-bookmark"></i></button>
     </div>`;
   }).join("")}</div>`);
 
@@ -2478,7 +2491,7 @@ function buildCCTab(p,c1,c2){
 
   // Corners
   if(p.cornerMarkets?.length){
-    h+=`<div class="cc-section"><div class="sec-ttl"><i class="ti ti-flag"></i> Corner Markets</div><div class="mkt-grid">${(p.cornerMarkets||[]).map(m=>{
+    h+=`<div class="cc-section"><div class="sec-ttl"><i class="ti ti-flag"></i> Corner Markets</div><div class="mkt-grid">${(p.cornerMarkets||[]).map((m,i)=>{
       const cc=cconf(m.confidence);
       return`<div class="mkt-card${m.value?" val":""}">
         ${m.value?`<span class="mkt-vtag">VALUE</span>`:""}
@@ -2486,13 +2499,14 @@ function buildCCTab(p,c1,c2){
         <div class="mkt-row"><span class="mkt-pick">${m.pick}</span><span class="mkt-odds">${m.odds}</span></div>
         ${confBar(m.confidence,cc)}
         ${m.reasoning?`<div class="mkt-rsn">${m.reasoning}</div>`:""}
+        <button class="btn-sm" style="margin-top:9px;font-size:10px;padding:4px 10px" onclick="quickSaveMarket('cornerMarkets',${i})"><i class="ti ti-bookmark"></i> Track this bet</button>
       </div>`;
     }).join("")}</div></div>`;
   }
 
   // Cards
   if(p.cardMarkets?.length){
-    h+=`<div class="cc-section"><div class="sec-ttl"><i class="ti ti-cards"></i> Card Markets</div><div class="mkt-grid">${(p.cardMarkets||[]).map(m=>{
+    h+=`<div class="cc-section"><div class="sec-ttl"><i class="ti ti-cards"></i> Card Markets</div><div class="mkt-grid">${(p.cardMarkets||[]).map((m,i)=>{
       const cc=cconf(m.confidence);
       return`<div class="mkt-card${m.value?" val":""}">
         ${m.value?`<span class="mkt-vtag">VALUE</span>`:""}
@@ -2500,6 +2514,7 @@ function buildCCTab(p,c1,c2){
         <div class="mkt-row"><span class="mkt-pick">${m.pick}</span><span class="mkt-odds">${m.odds}</span></div>
         ${confBar(m.confidence,cc)}
         ${m.reasoning?`<div class="mkt-rsn">${m.reasoning}</div>`:""}
+        <button class="btn-sm" style="margin-top:9px;font-size:10px;padding:4px 10px" onclick="quickSaveMarket('cardMarkets',${i})"><i class="ti ti-bookmark"></i> Track this bet</button>
       </div>`;
     }).join("")}</div></div>`;
   }

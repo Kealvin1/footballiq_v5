@@ -1640,7 +1640,7 @@ async function doAnalyze(forceRefresh=false){
     const _staticBlock={type:"text",text:PHASE2_STATIC_PROMPT,cache_control:{type:"ephemeral"}};
     let rawAnalysis;
     try{
-      rawAnalysis = await callAI([_staticBlock,{type:"text",text:analysisPrompt}], 12000, false, ANALYST_SYSTEM, "claude-sonnet-4-6", 0.3);
+      rawAnalysis = await callAI([_staticBlock,{type:"text",text:analysisPrompt}], 12000, false, ANALYST_SYSTEM, "claude-sonnet-4-6", 0.2);
     }catch(e){
       if(e.message==="__TRUNCATED__"){
         // Response was cut off — retry asking for more compact output
@@ -1649,7 +1649,7 @@ async function doAnalyze(forceRefresh=false){
           "\n\nCRITICAL: Previous attempt was too long and got cut off. "+
           "Be extremely concise. Limit reasoning fields to 8 words max. "+
           "Skip oddsComparison array entirely (use []). Output valid complete JSON under 6000 tokens.";
-        rawAnalysis = await callAI([_staticBlock,{type:"text",text:retryDynamic}], 12000, false, ANALYST_SYSTEM, "claude-sonnet-4-6", 0.3);
+        rawAnalysis = await callAI([_staticBlock,{type:"text",text:retryDynamic}], 12000, false, ANALYST_SYSTEM, "claude-sonnet-4-6", 0.2);
       } else { throw e; }
     }
 

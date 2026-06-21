@@ -1586,10 +1586,21 @@ async function doAnalyze(forceRefresh=false){
     const intelPrompt = buildIntelPrompt(t1,t2,comp,xg1,xg2,lineMovement);
     let intel;
     try{
-      intel = await callAI(intelPrompt, 4000, true, "", "claude-haiku-4-5-20251001");
+      // Raised from 4000 — Phase 1's task has grown substantially (venue
+      // verification, referee neutrality, weather, stakes language, form
+      // priority, rotation, on top of lineup/injury corroboration) and
+      // needs more room to complete without truncating.
+      intel = await callAI(intelPrompt, 6000, true, "", "claude-haiku-4-5-20251001");
     }catch(e){
       if(e.message==="__TRUNCATED__"){
-        intel = await callAI(intelPrompt, 3000, true, "", "claude-haiku-4-5-20251001");
+        // Retry with an explicit compactness instruction, not just a
+        // lower ceiling on the same verbose prompt — the old version
+        // dropped tokens AND kept the prompt unchanged, which reliably
+        // failed the retry too.
+        toast("Optimising research length — retrying...", 3000);
+        const compactIntelPrompt = intelPrompt +
+          "\n\nCRITICAL: Previous attempt was too long and got cut off. Be far more concise — short factual bullet points only, no elaboration, no repeated context. Prioritise: LINEUPS tag, DATA tag, confirmed/predicted XI names, then brief H2H/referee/weather notes. Skip anything non-essential.";
+        intel = await callAI(compactIntelPrompt, 5000, true, "", "claude-haiku-4-5-20251001");
       } else { throw e; }
     }
 
@@ -1882,7 +1893,7 @@ DATA: RICH ✓ (or LIMITED ~ or MINIMAL ✗) — one sentence why
 
 Then provide your full intelligence report below those two lines.
 
-Be specific — real player names, exact scores, real statistics only.`;
+Be specific — real player names, exact scores, real statistics only. Given the breadth of what's being asked, write efficiently: short factual statements rather than elaborated prose, no repeating context already stated, no restating the same point under multiple headings. Aim to cover every required element above concisely rather than covering fewer elements at length.`;
 }
 
 // ── CALIBRATION MEMO — feeds prediction history back into Phase 2 ──

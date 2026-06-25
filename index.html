@@ -6,6 +6,11 @@
 <meta name="description" content="FootballIQ — Premium AI-powered football match predictions with real xG data, live odds and value bet detection"/>
 <meta name="theme-color" content="#1D9E75"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="theme-color" content="#c9a84c"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<link rel="manifest" href="/manifest.json"/>
 <title>FootballIQ — Premium AI Football Predictions</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -1371,6 +1376,8 @@ function advanceStep(phase,totalSteps){
 function refreshAnalysis(){
   if(!_curCacheKey){doAnalyze(true);return}
   cacheSet(_curCacheKey,null); // delete this match from cache
+  curPred=null; // null stale prediction so no button (Track, Acca, lineup toggle)
+                // can silently operate on the old match's data if re-run fails mid-way
   hide("results-section");show("form-section");
   // Brief delay so user sees the form before analysis starts
   setTimeout(()=>doAnalyze(true),100);
@@ -1649,7 +1656,8 @@ async function selfConsistencyCheck(p, t1, t2, comp, intel, tier, richness){
     if(!wp)return p;
     const sorted=[wp.team1||0,wp.draw||0,wp.team2||0].sort((a,b)=>b-a);
     const gap=sorted[0]-sorted[1]; // gap between top and second outcome
-    if(gap>=12)return p; // not a close match — skip, no extra cost/latency
+    if(gap>=20)return p; // genuinely clear-cut favourite — skip, no extra cost/latency
+    // Gap 20-100: still run check (e.g. 55/25/20 is NOT a banker — draw still very live)
 
     const checkPrompt=`Quick independent cross-check for ${t1} vs ${t2} (${comp}).
 Based on this same context:
@@ -1672,10 +1680,16 @@ What are your win probabilities for ${t1} (home/team1) vs Draw vs ${t2} (away/te
       // red flag), so soften confidence and blend the two probability reads
       // rather than fully trusting either one alone.
       console.warn(`Self-consistency check found divergence on ${t1} vs ${t2}: main=${JSON.stringify(wp)}, check=${JSON.stringify(check)}`);
+      // Blend + normalise to 100 — raw averages can sum to 101/102 due to
+      // rounding, which would display wrong numbers to the user.
+      const rawT1=Math.round((wp.team1+check.team1)/2);
+      const rawD=Math.round((wp.draw+check.draw)/2);
+      const rawT2=Math.round((wp.team2+check.team2)/2);
+      const rawSum=rawT1+rawD+rawT2;
       p.winProbabilities={
-        team1:Math.round((wp.team1+check.team1)/2),
-        draw:Math.round((wp.draw+check.draw)/2),
-        team2:Math.round((wp.team2+check.team2)/2),
+        team1:Math.round(rawT1/rawSum*100),
+        draw:Math.round(rawD/rawSum*100),
+        team2:100-Math.round(rawT1/rawSum*100)-Math.round(rawD/rawSum*100),
       };
       if(p.mainPrediction&&typeof p.mainPrediction.confidence==="number"){
         p.mainPrediction.confidence=Math.max(35,p.mainPrediction.confidence-10);
@@ -2131,20 +2145,55 @@ function getCalibrationMemo(){
       return`  · At ${band} stated confidence: actual win rate ${actual}% — ${adj}`;
     }).join("\n");
 
+  // Brier Score — proper scoring rule for probabilistic forecasts.
+  // BS = (1/N) * Σ(probability - outcome)². Range 0 (perfect) to 1 (worst).
+  // For reference: random guessing = 0.25, good calibration ≈ 0.15-0.20.
+  const brierItems = settled.filter(h => h.confidence != null);
+  let brierScore = null;
+  if(brierItems.length >= 5){
+    const sumSq = brierItems.reduce((s, h) => {
+      const p = (h.confidence||0) / 100;
+      const outcome = h.status === "won" ? 1 : 0;
+      return s + Math.pow(p - outcome, 2);
+    }, 0);
+    brierScore = +(sumSq / brierItems.length).toFixed(3);
+  }
+
+  // Confidence correction multiplier: if the system consistently overstates
+  // confidence (says 70%, wins 55%), derive a correction factor to apply.
+  let correctionMemo = "";
+  const confsettled = settled.filter(h => h.confidence != null && h.confidence >= 50);
+  if(confsettled.length >= 10){
+    const avgStated  = confsettled.reduce((s,h) => s + (h.confidence||0), 0) / confsettled.length / 100;
+    const avgActual  = confsettled.filter(h => h.status === "won").length / confsettled.length;
+    const multiplier = avgActual / avgStated;
+    if(!isFinite(multiplier) || isNaN(multiplier)) { correctionMemo = ""; }
+    else if(Math.abs(multiplier - 1) > 0.08){ // only flag if >8% systematic bias
+      correctionMemo = multiplier < 1
+        ? `SYSTEMATIC OVERCONFIDENCE DETECTED: average stated confidence ${Math.round(avgStated*100)}%, actual win rate ${Math.round(avgActual*100)}%. Apply a ${+(1-multiplier).toFixed(2)}x downward correction to all stated confidence values.`
+        : `SYSTEMATIC UNDERCONFIDENCE DETECTED: average stated confidence ${Math.round(avgStated*100)}%, actual win rate ${Math.round(avgActual*100)}%. You may be ${+(multiplier-1).toFixed(2)}x bolder in your stated confidence.`;
+    } else {
+      correctionMemo = `Confidence is well-calibrated (stated avg ${Math.round(avgStated*100)}% vs actual ${Math.round(avgActual*100)}%) — no systematic correction needed.`;
+    }
+  }
+
   return `
 === PERSONAL CALIBRATION DATA (${settled.length} settled predictions) ===
 Your historical win rate: ${overallWR}% (${won.length} won / ${settled.length} settled)
+${brierScore!==null?`Brier Score: ${brierScore} (lower is better; <0.20 is good, <0.15 is excellent, 0.25 = random)`:""}
 
 Market accuracy breakdown:
 ${mktLines||"  · Insufficient per-market data yet"}
 
 Confidence calibration:
 ${bandLines||"  · Insufficient band data yet"}
+${correctionMemo?`
+Calibration correction: ${correctionMemo}`:""}
 
 INSTRUCTION: Use this data to adjust your confidence percentages before outputting.
 If a market historically underperforms, reduce stated confidence by the indicated amount.
-If a market overperforms, you may be slightly bolder. This ensures your predictions
-self-calibrate to real-world accuracy over time.
+Apply the systematic correction multiplier if shown — this is a real, evidence-based
+adjustment based on ${settled.length} settled predictions, not a guess.
 === END CALIBRATION DATA ===
 `;
 }
@@ -2241,7 +2290,7 @@ function renderResults(p,fromCache){
   }
   const _cacheAge=curPred?._cachedAt?Math.round((Date.now()-curPred._cachedAt)/60000):0;
   const _cacheLabel=_cacheAge>0?`<span class="cache-tag"><i class="ti ti-clock" style="font-size:10px"></i> Cached ${_cacheAge<60?_cacheAge+"m ago":Math.round(_cacheAge/60)+"h ago"}</span>`:"";
-  html("action-bar",`<button class="btn-sm" onclick="addToAcca()"><i class="ti ti-plus"></i> Add Top Pick to Acca</button><button class="btn-ghost" onclick="refreshAnalysis()" title="Clear cache and re-run with latest data" style="font-size:11px;padding:6px 13px"><i class="ti ti-refresh-alert"></i> Refresh</button><button class="btn-ghost" onclick="sharePredict()" style="font-size:11px;padding:6px 13px"><i class="ti ti-share"></i> Share</button>${_cacheLabel}`);
+  html("action-bar",`<button class="btn-sm" onclick="addToAcca()"><i class="ti ti-plus"></i> Add Top Pick to Acca</button><button class="btn-ghost" onclick="refreshAnalysis()" title="Clear cache and re-run with latest data" style="font-size:11px;padding:6px 13px"><i class="ti ti-refresh-alert"></i> Refresh</button><button class="btn-ghost" onclick="addToAlerts()" title="Get notified when lineups drop for this match" style="font-size:11px;padding:6px 13px"><i class="ti ti-bell"></i> Alert</button><button class="btn-ghost" onclick="sharePredict()" style="font-size:11px;padding:6px 13px"><i class="ti ti-share"></i> Share</button>${_cacheLabel}`);
 
   if(p.analystNote){show("an-note");txt("an-txt",p.analystNote)}else hide("an-note");
   if(p.chainOfThought){show("cot-box");txt("cot-txt",p.chainOfThought)}else hide("cot-box");
@@ -2912,8 +2961,48 @@ function markResult(id,status){
 
 async function autoCheckResult(id){
   const hist=getLS(LS.HIST,[]);const entry=hist.find(h=>h.id===id);
-  if(!entry)return;toast("Searching for result...",4000);
+  if(!entry)return;toast("Looking up result via api-football.com...",4000);
   try{
+    // Try the real api-football.com endpoint first (fast, accurate, free tier)
+    const params=new URLSearchParams({
+      team1:entry.team1||"",team2:entry.team2||"",
+      competition:entry.competition||"",date:entry.addedAt||new Date().toISOString(),
+    });
+    const apiResp=await fetch(`/api/results?${params}`).then(r=>r.json()).catch(()=>null);
+
+    if(apiResp&&apiResp.found&&apiResp.settled){
+      // Map api-football result into the format checkIfWon() expects
+      const score=`${apiResp.homeScore}-${apiResp.awayScore}`;
+      const homeTeam=apiResp.team1IsHome?entry.team1:entry.team2;
+      const awayTeam=apiResp.team1IsHome?entry.team2:entry.team1;
+      let winnerName="draw";
+      if(apiResp.winner==="home")winnerName=homeTeam;
+      if(apiResp.winner==="away")winnerName=awayTeam;
+      const d={found:true,score,winner:winnerName,homeScore:apiResp.homeScore,awayScore:apiResp.awayScore};
+      const predPick=entry.pick||"";
+      const won=checkIfWon(predPick,d,entry.team1,entry.team2);
+      const i=hist.findIndex(h=>h.id===id);
+      if(i>=0){
+        hist[i].result=score;
+        hist[i].settledBy="api-football";
+        if(won===null){
+          // For markets we can't auto-determine (BTTS, O/U, corners etc.)
+          // store the result but leave pending — user marks W/L
+          setLS(LS.HIST,hist);renderHistoryPage();
+          toast(`Result: ${score} (${homeTeam} vs ${awayTeam}) — please mark Won/Lost for this market`);
+          return;
+        }
+        hist[i].status=won?"won":"lost";
+        setLS(LS.HIST,hist);
+      }
+      renderHistoryPage();toast(`Result: ${score} — Marked ${won?"Won ✓":"Lost ✗"} (via api-football.com)`);
+      return;
+    }
+    if(apiResp&&apiResp.found&&!apiResp.settled){
+      toast(`Match found but not yet finished (${apiResp.status}) — try again after full time`);return;
+    }
+    // Fallback: AI web search (uses one Anthropic API call but always works)
+    toast("Real-time lookup inconclusive — trying AI search...",3000);
     const raw=await callAI(`Search for the football match result: ${entry.team1} vs ${entry.team2} (${entry.competition}). The match was around ${fmtDate(entry.addedAt)}.
 Return ONLY valid JSON: {"found":true,"score":"2-1","winner":"${entry.team1}","status":"finished"}
 If not found: {"found":false}`,400,true);
@@ -2923,8 +3012,8 @@ If not found: {"found":false}`,400,true);
     const won=checkIfWon(predPick,d,entry.team1,entry.team2);
     if(won===null){toast(`Result found: ${d.score} — Please mark manually (market type not auto-detectable)`);return;}
     const i=hist.findIndex(h=>h.id===id);
-    if(i>=0){hist[i].status=won?"won":"lost";hist[i].result=d.score;setLS(LS.HIST,hist)}
-    renderHistoryPage();toast(`Result found: ${d.score} — Marked as ${won?"Won ✓":"Lost ✗"}`);
+    if(i>=0){hist[i].status=won?"won":"lost";hist[i].result=d.score;hist[i].settledBy="ai-search";setLS(LS.HIST,hist)}
+    renderHistoryPage();toast(`Result found: ${d.score} — Marked as ${won?"Won ✓":"Lost ✗"} (via AI search)`);
   }catch(e){toast("Auto-check failed: "+e.message)}
 }
 
@@ -2958,6 +3047,68 @@ try{$("t1").focus()}catch{}
 try{acca=JSON.parse(localStorage.getItem(LS.ACCA)||"[]")}catch{acca=[]}
 updateAccaBadge();
 $("cur-sym").textContent=getCurrency();
+
+// ── PWA & ALERT SYSTEM ───────────────────────────────────────────────
+
+// Service worker registration
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.register("/service-worker.js")
+    .then(reg => {
+      console.log("FootballIQ SW registered:", reg.scope);
+      swReg = reg;
+    })
+    .catch(err => console.warn("SW registration failed:", err.message));
+}
+
+let swReg = null;
+
+// Alert shortlist stored in localStorage
+const LS_ALERT = "fiq-alert-shortlist";
+function getAlertShortlist(){ return getLS(LS_ALERT, []); }
+function setAlertShortlist(v){ localStorage.setItem(LS_ALERT, JSON.stringify(v)); }
+
+function addToAlerts(){
+  if(!curPred){toast("Run an analysis first");return}
+  const sl = getAlertShortlist();
+  const already = sl.some(a => a.team1===curPred.team1 && a.team2===curPred.team2);
+  if(already){toast("Already monitoring this match ✓");return}
+  const kickoffStr = prompt(`When does ${curPred.team1} vs ${curPred.team2} kick off?\n(Enter time like "20:30" or "2026-06-25 20:30")`);
+  if(!kickoffStr){return}
+  // If input looks like a time only (HH:MM), prepend today's date
+  let kickoffStr2 = kickoffStr.trim();
+  if(/^\d{1,2}:\d{2}$/.test(kickoffStr2)){
+    kickoffStr2 = new Date().toISOString().split("T")[0] + " " + kickoffStr2;
+  }
+  const kickoff = new Date(kickoffStr2);
+  if(isNaN(kickoff.getTime())){toast("Invalid time — try 20:30 or 2026-06-25 20:30");return}
+  sl.push({team1:curPred.team1,team2:curPred.team2,competition:curPred.competition,kickoff:kickoff.toISOString(),addedAt:new Date().toISOString()});
+  setAlertShortlist(sl);
+  requestNotificationPermission();
+  toast(`⏰ Monitoring ${curPred.team1} vs ${curPred.team2} ✓ — you'll be notified near kickoff`);
+}
+
+async function requestNotificationPermission(){
+  if(!("Notification" in window)){toast("Notifications not supported in this browser");return false}
+  if(Notification.permission === "granted") return true;
+  if(Notification.permission === "denied"){toast("Notifications blocked — enable in browser settings");return false}
+  const result = await Notification.requestPermission();
+  if(result!=="granted"){toast("Notifications declined — alerts won't fire");}
+  return result === "granted";
+}
+
+// Poll the service worker with the current shortlist every 5 minutes
+function startAlertPolling(){
+  if(!("serviceWorker" in navigator)) return;
+  setInterval(async () => {
+    const sl = getAlertShortlist();
+    if(!sl.length) return;
+    const reg = await navigator.serviceWorker.ready.catch(() => null);
+    if(!reg?.active) return;
+    reg.active.postMessage({ type: "CHECK_ALERTS", shortlist: sl });
+  }, 5 * 60 * 1000);
+}
+startAlertPolling();
+
 </script>
 </body>
 </html>

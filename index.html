@@ -889,8 +889,15 @@ select option{background:var(--card2)}
   <div class="stats-bar" id="hist-stats"></div>
   <div class="row-between">
     <p style="font-size:13px;font-weight:700">Prediction Record</p>
-    <button class="btn-danger" onclick="clearHistory()"><i class="ti ti-trash"></i> Clear all</button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <label class="btn-sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:6px 12px" title="Import 1xBet HTML bet history">
+        <i class="ti ti-upload"></i> Import 1xBet
+        <input type="file" accept=".html" style="display:none" onchange="import1xBet(this)">
+      </label>
+      <button class="btn-danger" onclick="clearHistory()"><i class="ti ti-trash"></i> Clear all</button>
+    </div>
   </div>
+  <div id="import-status" style="display:none;margin-bottom:10px;font-size:12px;padding:8px 12px;border-radius:8px;background:rgba(0,200,150,0.1);color:#00c896;border:1px solid rgba(0,200,150,0.3)"></div>
   <div id="hist-list"></div>
   <div class="empty hidden" id="hist-empty"><i class="ti ti-history"></i><p>No saved predictions yet.</p></div>
 
@@ -3050,6 +3057,174 @@ try{$("t1").focus()}catch{}
 try{acca=JSON.parse(localStorage.getItem(LS.ACCA)||"[]")}catch{acca=[]}
 updateAccaBadge();
 $("cur-sym").textContent=getCurrency();
+
+
+// ── 1XBET HISTORY IMPORT ─────────────────────────────────────────────
+
+const XBET_MARKET_MAP = {
+  "W1":                         ["1X2",                  "W1"],
+  "X":                          ["1X2",                  "Draw"],
+  "W2":                         ["1X2",                  "W2"],
+  "Both Teams To Score - Yes":  ["Both Teams to Score",  "Yes"],
+  "Both Teams To Score - No":   ["Both Teams to Score",  "No"],
+  "Total Over (2.5)":           ["Over/Under 2.5 Goals", "Over 2.5"],
+  "Total Under (2.5)":          ["Over/Under 2.5 Goals", "Under 2.5"],
+  "Total Over (3.5)":           ["Over/Under 3.5 Goals", "Over 3.5"],
+  "Total Under (3.5)":          ["Over/Under 3.5 Goals", "Under 3.5"],
+  "Total Over (1.5)":           ["Over/Under 1.5 Goals", "Over 1.5"],
+  "Total Under (1.5)":          ["Over/Under 1.5 Goals", "Under 1.5"],
+  "Total Over (3)":             ["Over/Under 3 Goals",   "Over 3"],
+  "Total Under (3)":            ["Over/Under 3 Goals",   "Under 3"],
+  "Total Over (2)":             ["Over/Under 2 Goals",   "Over 2"],
+  "Total Under (2)":            ["Over/Under 2 Goals",   "Under 2"],
+  "Total Over (4)":             ["Over/Under 4 Goals",   "Over 4"],
+  "Total Under (4)":            ["Over/Under 4 Goals",   "Under 4"],
+  "Total Over (4.5)":           ["Over/Under 4.5 Goals", "Over 4.5"],
+  "Total Under (4.5)":          ["Over/Under 4.5 Goals", "Under 4.5"],
+  "Total Over (9.5)":           ["Total Corners O/U 9.5","Over"],
+  "Total Under (9.5)":          ["Total Corners O/U 9.5","Under"],
+  "Total Over (10)":            ["Total Corners O/U 10", "Over"],
+  "Total Under (10)":           ["Total Corners O/U 10", "Under"],
+  "Total Over (10.5)":          ["Total Corners O/U 10.5","Over"],
+  "Total Under (10.5)":         ["Total Corners O/U 10.5","Under"],
+  "Total Under (5.5)":          ["Over/Under 5.5 Goals", "Under 5.5"],
+  "Total Over (5.5)":           ["Over/Under 5.5 Goals", "Over 5.5"],
+  "Handicap 1 (0.25)":          ["Asian Handicap",       "Team 1 -0.25"],
+  "Handicap 2 (0.25)":          ["Asian Handicap",       "Team 2 -0.25"],
+  "Handicap 1 (-0.5)":          ["Asian Handicap",       "Team 1 -0.5"],
+  "Handicap 2 (-0.5)":          ["Asian Handicap",       "Team 2 -0.5"],
+  "Team 1 To Keep Clean Sheet": ["Clean Sheet",           "Team 1 - Yes"],
+  "Team 2 To Keep Clean Sheet": ["Clean Sheet",           "Team 2 - Yes"],
+  "Team 1 To Win To Nil - Yes": ["Win to Nil",            "Team 1 - Yes"],
+  "Team 2 To Win To Nil - Yes": ["Win to Nil",            "Team 2 - Yes"],
+};
+
+const XBET_COMP_MAP = {
+  "Football. World Cup 2026":       "World Cup",
+  "Football. Premier League":       "Premier League",
+  "Football. Champions League":     "UEFA Champions League",
+  "Football. La Liga":              "La Liga",
+  "Football. Serie A":              "Serie A",
+  "Football. Bundesliga":           "Bundesliga",
+  "Football. Ligue 1":              "Ligue 1",
+  "Football. Europa League":        "UEFA Europa League",
+  "Football. AFCON":                "AFCON",
+  "Football. Copa America":         "Copa América",
+};
+
+function parse1xBetHTML(html){
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  const blocks = doc.querySelectorAll(".cupHisNew");
+  const bets = [];
+
+  blocks.forEach(block => {
+    try {
+      // Bet ID and date
+      const idEl   = block.querySelector(".time b");
+      const dateEl = block.querySelector(".time time");
+      const betId  = idEl?.textContent.replace("Bet slip №","").trim();
+      const dateStr = dateEl?.textContent.trim(); // "20.06.2026 | 20:43"
+
+      // Competition + event from win/lose b tag
+      const eventEl = block.querySelector("b.win, b.lose");
+      const rawText = eventEl?.innerHTML.replace(/<br\s*\/?>/gi," | ") || "";
+      const parts   = rawText.split(" | ").map(s=>s.trim()).filter(Boolean);
+      const compRaw = parts[0] || "";
+      const matchName = parts[1] || "";
+      const teamParts = matchName.includes(" - ") ? matchName.split(" - ") : [];
+      const team1 = teamParts[0]?.trim() || "";
+      const team2 = teamParts[1]?.trim() || "";
+
+      // Market (bet text), odds, status
+      const cells  = [...block.querySelectorAll("td.ce[rowspan='2']")];
+      const market = cells[0]?.textContent.trim() || "";
+      const odds   = parseFloat(cells[1]?.textContent.trim()) || null;
+      const status = cells[2]?.textContent.trim().toLowerCase();
+
+      // Stake + result
+      const resultEl = block.querySelector("td.ha + tr td");
+      const resultText = resultEl?.textContent || "";
+      const resultMatch = resultText.match(/Result:\s*([\d:()]+)/);
+      const result = resultMatch?.[1] || "";
+
+      const allCells = [...block.querySelectorAll("td.ce")];
+      const stakeEl  = allCells.find(td=>td.textContent.includes("MAD")&&!td.querySelector("b"));
+      const stake    = stakeEl ? parseFloat(stakeEl.textContent) : null;
+      const payoutEl = block.querySelector("td.ce b");
+      const payout   = payoutEl && payoutEl.textContent.includes("MAD")
+                       ? parseFloat(payoutEl.textContent) : null;
+
+      // Normalise
+      const mapped  = XBET_MARKET_MAP[market];
+      const fiqMkt  = mapped ? mapped[0] : market;
+      let   fiqPick = mapped ? mapped[1] : market;
+      if(fiqPick==="W1") fiqPick = team1;
+      if(fiqPick==="W2") fiqPick = team2;
+
+      const comp = XBET_COMP_MAP[compRaw] || compRaw.replace("Football. ","");
+
+      // Date parse: "20.06.2026 | 20:43"
+      const dp = dateStr.replace(" | "," ");
+      const [dd,mm,yyyy] = dp.substring(0,10).split(".");
+      const time = dp.substring(11) || "00:00";
+      const isoDate = `${yyyy}-${mm}-${dd}T${time}:00.000Z`;
+
+      if(!betId||!market||(status!=="win"&&status!=="loss")) return;
+
+      bets.push({
+        id:          `1xbet_${betId}`,
+        source:      "1xbet-import",
+        addedAt:     isoDate,
+        team1, team2,
+        competition: comp,
+        pick:        `${fiqMkt}: ${fiqPick}`,
+        market:      fiqMkt,
+        odds, stake, payout, result,
+        confidence:  null,
+        status:      status==="win" ? "won" : "lost",
+        settledBy:   "1xbet-import",
+      });
+    } catch(e){ console.warn("1xBet parse error:", e.message); }
+  });
+
+  return bets;
+}
+
+function import1xBet(input){
+  const file = input.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const bets = parse1xBetHTML(e.target.result);
+      if(!bets.length){ toast("No bets found in this file"); return; }
+
+      const existing = getLS(LS.HIST, []);
+      const existingIds = new Set(existing.map(h=>h.id));
+      const newBets = bets.filter(b => !existingIds.has(b.id));
+      const dupeCount = bets.length - newBets.length;
+
+      const merged = [...newBets, ...existing];
+      // Sort by date descending
+      merged.sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+      setLS(LS.HIST, merged);
+
+      const statusEl = document.getElementById("import-status");
+      if(statusEl){
+        statusEl.style.display = "block";
+        statusEl.textContent = `✓ Imported ${newBets.length} bets from 1xBet${dupeCount?" ("+dupeCount+" duplicates skipped)":""}. Calibration engine now has ${merged.length} total bets to learn from.`;
+      }
+      renderHistoryPage();
+      toast(`✓ ${newBets.length} bets imported from 1xBet`);
+      input.value = "";
+    } catch(err){
+      toast("Import failed: " + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
 
 // ── PWA & ALERT SYSTEM ───────────────────────────────────────────────
 

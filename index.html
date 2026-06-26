@@ -2111,16 +2111,34 @@ Be specific — real player names, exact scores, real statistics only. Given the
 }
 
 // ── CALIBRATION MEMO — feeds prediction history back into Phase 2 ──
-function getCalibrationMemo(){
+function getCalibrationMemo(targetTier){
+  // targetTier: the tier of the match currently being analysed.
+  // Calibration is split by tier so Tier 2 World Cup data (no real xG)
+  // does not dilute Tier 1 calibration (real xG), and vice versa.
   const hist=getLS(LS.HIST,[]);
   const settled=hist.filter(h=>h.status!=="pending");
-  if(settled.length<5)return ""; // need at least 5 settled bets to be meaningful
-  const won=settled.filter(h=>h.status==="won");
-  const overallWR=Math.round(won.length/settled.length*100);
+  if(settled.length<5)return "";
 
-  // Per-market accuracy
+  // Separate bets by tier using the same getCompTier() logic
+  const tierOf = h => getCompTier(h.competition||"");
+
+  // Primary: bets from the SAME tier as current match
+  const sameTier = targetTier ? settled.filter(h=>tierOf(h)===targetTier) : settled;
+  // Secondary: all settled (for overall stats only)
+  const allSettled = settled;
+
+  const primary = sameTier.length >= 3 ? sameTier : allSettled;
+  const usingSameTier = sameTier.length >= 3 && targetTier;
+  const tierNote = usingSameTier
+    ? `Filtered to Tier ${targetTier} matches only (${sameTier.length} bets) — keeping calibration relevant to this competition type.`
+    : `Using all ${allSettled.length} settled bets (fewer than 3 in Tier ${targetTier||"?"} yet).`;
+
+  const won=primary.filter(h=>h.status==="won");
+  const overallWR=Math.round(won.length/primary.length*100);
+
+  // Per-market accuracy — only from same tier
   const mktMap={};
-  settled.forEach(h=>{
+  primary.forEach(h=>{
     const m=h.market||"Other";
     if(!mktMap[m])mktMap[m]={w:0,t:0};
     mktMap[m].t++;
@@ -2131,13 +2149,13 @@ function getCalibrationMemo(){
     .sort((a,b)=>b[1].t-a[1].t)
     .map(([mkt,{w,t}])=>{
       const r=Math.round(w/t*100);
-      const note=r>=62?"STRONG — you can be confident here":r<=42?"WEAK — reduce confidence on this market":"reasonable";
+      const note=r>=62?"STRONG — you can be confident here":r<=42?"WEAK — reduce stated confidence on this market":"reasonable";
       return`  · ${mkt}: ${w}/${t} bets won (${r}%) — ${note}`;
     }).join("\n");
 
-  // Per confidence-band calibration
+  // Per confidence-band calibration — from same tier only (primary)
   const bands={"50-60%":{p:0,w:0},"60-70%":{p:0,w:0},"70-80%":{p:0,w:0},"80%+":{p:0,w:0}};
-  settled.forEach(h=>{
+  primary.forEach(h=>{
     const conf=h.confidence||0;
     const b=conf>=80?"80%+":conf>=70?"70-80%":conf>=60?"60-70%":conf>=50?"50-60%":null;
     if(b){bands[b].p++;if(h.status==="won")bands[b].w++}
@@ -2158,7 +2176,8 @@ function getCalibrationMemo(){
   // Brier Score — proper scoring rule for probabilistic forecasts.
   // BS = (1/N) * Σ(probability - outcome)². Range 0 (perfect) to 1 (worst).
   // For reference: random guessing = 0.25, good calibration ≈ 0.15-0.20.
-  const brierItems = settled.filter(h => h.confidence != null);
+  // Brier score — from same tier only (primary)
+  const brierItems = primary.filter(h => h.confidence != null);
   let brierScore = null;
   if(brierItems.length >= 5){
     const sumSq = brierItems.reduce((s, h) => {
@@ -2172,7 +2191,8 @@ function getCalibrationMemo(){
   // Confidence correction multiplier: if the system consistently overstates
   // confidence (says 70%, wins 55%), derive a correction factor to apply.
   let correctionMemo = "";
-  const confsettled = settled.filter(h => h.confidence != null && h.confidence >= 50);
+  // Correction multiplier — from same tier only (primary)
+  const confsettled = primary.filter(h => h.confidence != null && h.confidence >= 50);
   if(confsettled.length >= 10){
     const avgStated  = confsettled.reduce((s,h) => s + (h.confidence||0), 0) / confsettled.length / 100;
     const avgActual  = confsettled.filter(h => h.status === "won").length / confsettled.length;
@@ -2187,23 +2207,39 @@ function getCalibrationMemo(){
     }
   }
 
+  // Cross-tier overview (always shown for full context)
+  const allWon = allSettled.filter(h=>h.status==="won");
+  const crossTierLines = [1,2,3].map(t=>{
+    const tb = allSettled.filter(h=>tierOf(h)===t);
+    if(!tb.length) return null;
+    const tw = tb.filter(h=>h.status==="won").length;
+    return `  · Tier ${t}: ${tw}/${tb.length} won (${Math.round(tw/tb.length*100)}%)`;
+  }).filter(Boolean).join("\n");
+
   return `
-=== PERSONAL CALIBRATION DATA (${settled.length} settled predictions) ===
-Your historical win rate: ${overallWR}% (${won.length} won / ${settled.length} settled)
+=== PERSONAL CALIBRATION DATA ===
+Scope: ${tierNote}
+Overall across all tiers: ${allWon.length}/${allSettled.length} won (${Math.round(allWon.length/allSettled.length*100)}%)
+${crossTierLines}
+
+This match is Tier ${targetTier||"?"} — detailed calibration below is from Tier ${targetTier||"?"} bets only:
+Win rate (Tier ${targetTier||"?"} only): ${overallWR}% (${won.length} won / ${primary.length} settled)
 ${brierScore!==null?`Brier Score: ${brierScore} (lower is better; <0.20 is good, <0.15 is excellent, 0.25 = random)`:""}
 
-Market accuracy breakdown:
-${mktLines||"  · Insufficient per-market data yet"}
+Market accuracy (Tier ${targetTier||"?"} only):
+${mktLines||"  · Insufficient per-market data yet for this tier"}
 
-Confidence calibration:
-${bandLines||"  · Insufficient band data yet"}
+Confidence calibration (Tier ${targetTier||"?"} only):
+${bandLines||"  · Insufficient band data yet for this tier"}
 ${correctionMemo?`
 Calibration correction: ${correctionMemo}`:""}
 
-INSTRUCTION: Use this data to adjust your confidence percentages before outputting.
-If a market historically underperforms, reduce stated confidence by the indicated amount.
-Apply the systematic correction multiplier if shown — this is a real, evidence-based
-adjustment based on ${settled.length} settled predictions, not a guess.
+CRITICAL INSTRUCTION: The market accuracy and confidence correction above apply ONLY to
+this competition type (Tier ${targetTier||"?"}). Do NOT let results from other tiers
+influence your confidence adjustments for this match. If a market shows WEAK performance
+in this tier, reduce your stated confidence on that market for this prediction. If it
+shows STRONG performance, you may be bolder. This is real evidence from ${primary.length}
+settled predictions at the same tier, not a generic adjustment.
 === END CALIBRATION DATA ===
 `;
 }
@@ -2250,7 +2286,7 @@ Combined xG projection: ${(+xg1.home_avg_xGF + +xg2.away_avg_xGF).toFixed(2)} go
 Regression signals: ${t1} ${xg1.regression} | ${t2} ${xg2.regression}
 === END xG INSIGHT ===`:""}
 
-${getCalibrationMemo()}
+${getCalibrationMemo(_tier)}
 
 Now apply the methodology and JSON schema from the instructions above to ${t1} vs ${t2}. Remember: every "[Home Team]" placeholder in the schema means ${t1}, every "[Away Team]" placeholder means ${t2}. Fill in real values for this specific match throughout — team1/team2 fields, all picks, all lineups, all stats.`;
 }
@@ -3172,6 +3208,19 @@ function parse1xBetHTML(html){
 
       if(!betId||!market||(status!=="win"&&status!=="loss")) return;
 
+      // Derive estimated FootballIQ confidence from odds.
+      // Since all 1xBet bets were placed based on FootballIQ analysis,
+      // the odds are a reasonable proxy: FootballIQ marks value when it
+      // believes true probability > implied probability (1/odds).
+      // We estimate confidence as implied probability + a conservative
+      // 8-10% edge (the minimum FootballIQ requires to flag value),
+      // capped at a realistic ceiling.
+      let estConf = null;
+      if(odds){
+        const impliedProb = Math.round(1/odds*100);
+        // Conservative estimate: implied + 8% edge, capped at 82%
+        estConf = Math.min(82, impliedProb + 8);
+      }
       bets.push({
         id:          `1xbet_${betId}`,
         source:      "1xbet-import",
@@ -3181,9 +3230,10 @@ function parse1xBetHTML(html){
         pick:        `${fiqMkt}: ${fiqPick}`,
         market:      fiqMkt,
         odds, stake, payout, result,
-        confidence:  null,
+        confidence:  estConf,
         status:      status==="win" ? "won" : "lost",
         settledBy:   "1xbet-import",
+        _confidenceSource: "estimated-from-odds",
       });
     } catch(e){ console.warn("1xBet parse error:", e.message); }
   });

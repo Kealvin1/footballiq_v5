@@ -1457,6 +1457,8 @@ function quickSaveMarket(arrName,idx){
     confidence:confidence,status:"pending"});
   setLS(LS.HIST,hist);
   toast(`Tracking: ${pick||"bet"} ✓`);
+  // Re-render history if the user is currently on that page
+  if(document.getElementById("page-history")?.style.display!=="none")renderHistoryPage();
 }
 function quickSaveVB(idx){
   if(!curPred)return;
@@ -1470,6 +1472,7 @@ function quickSaveVB(idx){
     confidence:vb.confidence!=null?vb.confidence:null,status:"pending"});
   setLS(LS.HIST,hist);
   toast(`Tracking: ${vb.pick||"bet"} ✓`);
+  if(document.getElementById("page-history")?.style.display!=="none")renderHistoryPage();
 }
 
 

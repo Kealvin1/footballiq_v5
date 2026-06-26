@@ -4,9 +4,8 @@
 <meta charset="UTF-8"/>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>"/>
 <meta name="description" content="FootballIQ — Premium AI-powered football match predictions with real xG data, live odds and value bet detection"/>
-<meta name="theme-color" content="#1D9E75"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <meta name="theme-color" content="#c9a84c"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
@@ -790,7 +789,7 @@ select option{background:var(--card2)}
     </div>
 
     <div class="an-note hidden" id="an-note"><div class="an-lbl"><i class="ti ti-brain"></i> ANALYST NOTE</div><p id="an-txt"></p></div>
-    <div class="cot-box hidden" id="cot-box"><div class="cot-lbl"><i class="ti ti-list-details" style="color:var(--green);margin-right:4px"></i> CHAIN-OF-THOUGHT REASONING</div><div class="cot-txt" id="cot-txt"></div></div>
+    <div class="cot-box hidden" id="cot-box"><div class="cot-lbl"><i class="ti ti-list-details" style="color:var(--em);margin-right:4px"></i> CHAIN-OF-THOUGHT REASONING</div><div class="cot-txt" id="cot-txt"></div></div>
 
     <div class="tabs">
       <button class="tbtn active" id="tb-overview"  onclick="setTab('overview')"><i class="ti ti-layout-dashboard"></i> Overview</button>
@@ -919,16 +918,16 @@ select option{background:var(--card2)}
 <!-- SETTINGS MODAL -->
 <div class="overlay hidden" id="settings-overlay">
   <div class="modal">
-    <div class="modal-ttl"><i class="ti ti-settings" style="color:var(--green);margin-right:8px"></i>Settings</div>
+    <div class="modal-ttl"><i class="ti ti-settings" style="color:var(--em);margin-right:8px"></i>Settings</div>
     <div class="modal-sub">Configure FootballIQ</div>
     <div class="mb12">
       <label class="flabel">Anthropic API Key</label>
       <input type="password" id="key-input" placeholder="sk-ant-..." autocomplete="off"/>
-      <p style="font-size:11px;color:var(--t3);margin-top:5px">Stored in browser only · <a href="https://console.anthropic.com" target="_blank" style="color:var(--green)">console.anthropic.com</a></p>
+      <p style="font-size:11px;color:var(--t3);margin-top:5px">Stored in browser only · <a href="https://console.anthropic.com" target="_blank" style="color:var(--em)">console.anthropic.com</a></p>
     </div>
     <div class="mb12" style="background:var(--gl);border:1px solid rgba(201,168,76,0.2);border-radius:var(--rs);padding:11px 13px">
-      <div style="font-size:12px;font-weight:700;margin-bottom:3px"><i class="ti ti-server" style="color:var(--green)"></i> Odds API key — secured server-side</div>
-      <div style="font-size:11px;color:var(--t2)">Set <code style="background:var(--bg);padding:1px 5px;border-radius:3px">ODDS_API_KEY</code> in Netlify → Site settings → Environment variables. Free at <a href="https://the-odds-api.com" target="_blank" style="color:var(--green)">the-odds-api.com</a></div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:3px"><i class="ti ti-server" style="color:var(--em)"></i> Odds API key — secured server-side</div>
+      <div style="font-size:11px;color:var(--t2)">Set <code style="background:var(--bg);padding:1px 5px;border-radius:3px">ODDS_API_KEY</code> in Netlify → Site settings → Environment variables. Free at <a href="https://the-odds-api.com" target="_blank" style="color:var(--em)">the-odds-api.com</a></div>
     </div>
     <div class="mb12">
       <label class="flabel">Currency</label>
@@ -1202,7 +1201,7 @@ async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="c
   // temperature defaults to 0 (fully deterministic) — appropriate for
   // fact-retrieval calls (Phase 1 research, JSON repair, fixtures search)
   // where there's no benefit to sampling randomness. Phase 2 explicitly
-  // overrides this to 0.3 at its call site, since genuine analytical
+  // overrides this to 0.2 at its call site, since genuine analytical
   // judgment (weighing tactical factors, probability estimation) benefits
   // from a touch of flexibility, without going high enough to reintroduce
   // noise-driven inconsistency. Note: even at 0, output isn't perfectly
@@ -1337,10 +1336,12 @@ async function fetchLiveOddsProxy(comp){
 function matchToTeam(oddsGames,t1,t2){
   if(!oddsGames)return null;
   const n=s=>s.toLowerCase().replace(/[^a-z0-9]/g,"");
+  const n1=n(t1),n2=n(t2);
   return oddsGames.find(g=>{
     const ht=n(g.home_team||""),at=n(g.away_team||"");
-    const n1=n(t1),n2=n(t2);
-    return(ht.includes(n1)||n1.includes(ht))&&(at.includes(n2)||n2.includes(at));
+    // Try t1=home, t2=away first (expected), then the reverse (odds API sometimes flips)
+    return((ht.includes(n1)||n1.includes(ht))&&(at.includes(n2)||n2.includes(at)))||
+           ((ht.includes(n2)||n2.includes(ht))&&(at.includes(n1)||n1.includes(at)));
   })||null;
 }
 
@@ -1365,10 +1366,10 @@ function startPhaseBar(phase){
   const fill=$("phase-fill");
   const label=$("phase-label");
   if(phase===1){
-    fill.style.background="var(--blue)";fill.style.width="0%";
+    fill.style.background="var(--sap)";fill.style.width="0%";
     label.className="phase-label p1";label.innerHTML=`<i class="ti ti-world-search"></i> PHASE 1 — INTELLIGENCE GATHERING`;
   }else{
-    fill.style.background="var(--green)";fill.style.width="50%";
+    fill.style.background="var(--em)";fill.style.width="50%";
     label.className="phase-label p2";label.innerHTML=`<i class="ti ti-brain"></i> PHASE 2 — DEEP ANALYSIS`;
   }
 }
@@ -1465,7 +1466,7 @@ function quickSaveMarket(arrName,idx){
   setLS(LS.HIST,hist);
   toast(`Tracking: ${pick||"bet"} ✓`);
   // Re-render history if the user is currently on that page
-  if(document.getElementById("page-history")?.style.display!=="none")renderHistoryPage();
+  if($("page-history")?.classList.contains("active"))renderHistoryPage();
 }
 function quickSaveVB(idx){
   if(!curPred)return;
@@ -1479,7 +1480,7 @@ function quickSaveVB(idx){
     confidence:vb.confidence!=null?vb.confidence:null,status:"pending"});
   setLS(LS.HIST,hist);
   toast(`Tracking: ${vb.pick||"bet"} ✓`);
-  if(document.getElementById("page-history")?.style.display!=="none")renderHistoryPage();
+  if($("page-history")?.classList.contains("active"))renderHistoryPage();
 }
 
 
@@ -1696,11 +1697,10 @@ What are your win probabilities for ${t1} (home/team1) vs Draw vs ${t2} (away/te
       const rawD=Math.round((wp.draw+check.draw)/2);
       const rawT2=Math.round((wp.team2+check.team2)/2);
       const rawSum=rawT1+rawD+rawT2;
-      p.winProbabilities={
-        team1:Math.round(rawT1/rawSum*100),
-        draw:Math.round(rawD/rawSum*100),
-        team2:100-Math.round(rawT1/rawSum*100)-Math.round(rawD/rawSum*100),
-      };
+      const blT1=Math.round(rawT1/rawSum*100);
+      const blD=Math.round(rawD/rawSum*100);
+      const blT2=Math.max(0,100-blT1-blD); // guard: rounding can't push below 0
+      p.winProbabilities={team1:blT1,draw:blD,team2:blT2};
       if(p.mainPrediction&&typeof p.mainPrediction.confidence==="number"){
         p.mainPrediction.confidence=Math.max(35,p.mainPrediction.confidence-10);
       }
@@ -1725,7 +1725,7 @@ async function doAnalyze(forceRefresh=false){
   if(cached&&!forceRefresh){
     startLoading(t1,t2,comp);
     $("phase-fill").style.width="100%";
-    $("phase-fill").style.background="var(--green)";
+    $("phase-fill").style.background="var(--em)";
     setTimeout(()=>{hide("loading-section");renderResults({...cached,_fromCache:true},true)},400);
     return;
   }
@@ -1801,7 +1801,7 @@ async function doAnalyze(forceRefresh=false){
     startStepTimer(2);
 
     const _tier=getCompTier(comp);
-    const _richness=detectDataRichness(intel);
+    const _richness=dataRichness; // already computed above — avoid duplicate call
     const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,_tier,_richness,cornerStats);
     // Static methodology+schema block is identical on every Phase 2 call —
     // marking it cacheable saves ~90% on this ~2300-token block for any
@@ -1825,7 +1825,7 @@ async function doAnalyze(forceRefresh=false){
 
     clearInterval(stepTmr);
     $("phase-fill").style.width="100%";
-    $("phase-fill").style.background="var(--green)";
+    $("phase-fill").style.background="var(--em)";
 
     let p;
     try{
@@ -1893,15 +1893,15 @@ function setPhase(phase){
   const fill=$("phase-fill");
   const label=$("phase-label");
   if(phase===0){
-    fill.style.background="var(--amber)";fill.style.width="0%";
+    fill.style.background="var(--amr)";fill.style.width="0%";
     label.className="phase-label p0";
     label.innerHTML=`<i class="ti ti-database"></i> PHASE 0 — LOADING REAL DATA`;
   }else if(phase===1){
-    fill.style.background="var(--blue)";fill.style.width="20%";
+    fill.style.background="var(--sap)";fill.style.width="20%";
     label.className="phase-label p1";
     label.innerHTML=`<i class="ti ti-world-search"></i> PHASE 1 — INTELLIGENCE GATHERING`;
   }else{
-    fill.style.background="var(--green)";fill.style.width="60%";
+    fill.style.background="var(--em)";fill.style.width="60%";
     label.className="phase-label p2";
     label.innerHTML=`<i class="ti ti-brain"></i> PHASE 2 — DEEP ANALYSIS`;
   }
@@ -2286,7 +2286,7 @@ Combined xG projection: ${(+xg1.home_avg_xGF + +xg2.away_avg_xGF).toFixed(2)} go
 Regression signals: ${t1} ${xg1.regression} | ${t2} ${xg2.regression}
 === END xG INSIGHT ===`:""}
 
-${getCalibrationMemo(_tier)}
+${getCalibrationMemo(tier)}
 
 Now apply the methodology and JSON schema from the instructions above to ${t1} vs ${t2}. Remember: every "[Home Team]" placeholder in the schema means ${t1}, every "[Away Team]" placeholder means ${t2}. Fill in real values for this specific match throughout — team1/team2 fields, all picks, all lineups, all stats.`;
 }
@@ -2492,7 +2492,7 @@ function buildIntelTab(p,c1,c2){
         <div class="ref-stat"><span class="ref-k">Formation</span><span class="ref-v">${coach.formation||"—"}</span></div>
         <div class="ref-stat"><span class="ref-k">Tenure</span><span class="ref-v">${coach.tenure||"—"}</span></div>
         <div class="ref-stat"><span class="ref-k">Experience</span><span class="ref-v">${coach.experienceLevel||"—"}</span></div>
-        ${coach.pressureStatus?`<div style="font-size:11px;color:var(--amber);margin-top:8px">${coach.pressureStatus}</div>`:""}
+        ${coach.pressureStatus?`<div style="font-size:11px;color:var(--amr);margin-top:8px">${coach.pressureStatus}</div>`:""}
         ${coach.playerSentiment&&!/no reporting/i.test(coach.playerSentiment)?`<div style="font-size:11px;color:var(--t2);margin-top:4px;font-style:italic">${coach.playerSentiment}</div>`:""}
       </div>`;
     };
@@ -2524,7 +2524,7 @@ function buildIntelTab(p,c1,c2){
           <div>${spt.team2?.corners?`<div>Corners: ${spt.team2.corners}</div>`:""}${spt.team2?.freeKicks?`<div>Free kicks: ${spt.team2.freeKicks}</div>`:""}${spt.team2?.penalties?`<div>Penalties: ${spt.team2.penalties}</div>`:""}</div>
         </div>`;
       }
-      if(kpn.goalkeeperNote)h+=`<div style="font-size:12px;color:var(--amber);margin-top:8px">🧤 ${kpn.goalkeeperNote}</div>`;
+      if(kpn.goalkeeperNote)h+=`<div style="font-size:12px;color:var(--amr);margin-top:8px">🧤 ${kpn.goalkeeperNote}</div>`;
       if(kpn.squadStability)h+=`<div style="font-size:12px;color:var(--t2);margin-top:6px;font-style:italic">${kpn.squadStability}</div>`;
       h+=`</div>`;
     }
@@ -2549,7 +2549,7 @@ function buildIntelTab(p,c1,c2){
       <div class="ref-stat"><span class="ref-k">Yellows/game</span><span class="ref-v">${r.avgYellowPerGame||"—"}</span></div>
       <div class="ref-stat"><span class="ref-k">Penalty rate</span><span class="ref-v">${r.penaltyRate||"—"}</span></div>
       <div class="ref-stat"><span class="ref-k">Home bias</span><span class="ref-v">${r.homeBias||"—"}</span></div>
-      ${r.impactNote?`<div style="font-size:11px;color:var(--amber);margin-top:8px;font-style:italic">${r.impactNote}</div>`:""}
+      ${r.impactNote?`<div style="font-size:11px;color:var(--amr);margin-top:8px;font-style:italic">${r.impactNote}</div>`:""}
     </div>`;
   }
   if(hasWeatherOrRef)h+=`</div>`;
@@ -2575,7 +2575,7 @@ function buildIntelTab(p,c1,c2){
     h+=`<div class="intel-card"><div class="intel-card-title"><i class="ti ti-plane"></i> TRAVEL & FATIGUE</div>
       <div class="ref-stat"><span class="ref-k">${p.team1}</span><span class="ref-v" style="font-size:11px">${t.team1LastMatch||"—"}</span></div>
       <div class="ref-stat"><span class="ref-k">${p.team2}</span><span class="ref-v" style="font-size:11px">${t.team2LastMatch||"—"}</span></div>
-      ${t.fatigueImpact?`<div style="font-size:11px;color:var(--amber);margin-top:8px">${t.fatigueImpact}</div>`:""}
+      ${t.fatigueImpact?`<div style="font-size:11px;color:var(--amr);margin-top:8px">${t.fatigueImpact}</div>`:""}
     </div>`;
   }
   if(intel.oddsMovement){
@@ -2652,12 +2652,12 @@ function buildOddsTab(p,c1,c2){
                :matchMv.move_w1<-0.15?"🔵 Money drifting from HOME (line drifted)"
                :"⚪ Normal market movement";
       moveHtml=`<div style="background:rgba(186,117,23,.08);border:1px solid rgba(186,117,23,.25);border-radius:var(--rs);padding:12px 14px;margin-bottom:14px">
-        <div style="font-size:10px;font-weight:700;color:var(--amber);margin-bottom:6px;letter-spacing:.3px">LINE MOVEMENT (opening → current)</div>
+        <div style="font-size:10px;font-weight:700;color:var(--amr);margin-bottom:6px;letter-spacing:.3px">LINE MOVEMENT (opening → current)</div>
         <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px">
-          <div><span style="color:var(--t2)">Home win:</span> <strong>${matchMv.open_w1}</strong> → <strong style="color:var(--green)">${matchMv.current_w1}</strong></div>
+          <div><span style="color:var(--t2)">Home win:</span> <strong>${matchMv.open_w1}</strong> → <strong style="color:var(--em)">${matchMv.current_w1}</strong></div>
           ${matchMv.open_w2?`<div><span style="color:var(--t2)">Away win:</span> <strong>${matchMv.open_w2}</strong> → <strong>${matchMv.current_w2}</strong></div>`:""}
         </div>
-        <div style="font-size:12px;color:var(--amber);margin-top:8px">${dir}</div>
+        <div style="font-size:12px;color:var(--amr);margin-top:8px">${dir}</div>
         <div style="font-size:11px;color:var(--t2);margin-top:4px">${matchMv.signal}</div>
       </div>`;
     }

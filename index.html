@@ -976,9 +976,33 @@ STEP 7 — CORNERS ANALYSIS: Pressing intensity, set piece specialists, defensiv
 STEP 8 — MARKET VALUE: For each key market, compute: implied_probability = 1/odds. Also analyse the 10 additionalMarkets — use xG data for goals markets, HT xG splits for First Half 1X2, referee stats for Penalty, team xGA for Clean Sheet. Compare to your estimated true_probability. Only mark value=true when edge = (true_prob - implied_prob) / implied_prob > 0.05 (5%+ edge). Show the calculation. This prevents false value flags.
 STEP 9 — DEVIL'S ADVOCATE: Before finalising your main prediction, briefly construct the strongest realistic case for the OPPOSITE outcome (if you're leaning toward a home win, genuinely consider what would need to be true for an away win or draw instead). If this counter-case reveals a real weakness in your initial lean, adjust your confidence downward accordingly — do not just acknowledge the counter-case and then ignore it. This step exists specifically to catch overconfidence from anchoring on the first plausible conclusion.
 
-After reasoning, output ONLY a valid JSON object (NO markdown, NO code fences (no backticks), NO comments, NO trailing commas. Start your response with { and end with }. Precise confidence values like 63, 71, 58 — never multiples of 5. Keep "reasoning" under 12 words, "chainOfThought" under 80 words):
+After reasoning, output ONLY a valid JSON object (NO markdown, NO code fences (no backticks), NO comments, NO trailing commas. Start your response with { and end with }. Precise confidence values like 63, 71, 58 — never multiples of 5. Keep "reasoning" under 12 words, "chainOfThought" under 80 words).
+
+CRITICAL: The "intelligence" object is the FIRST thing you must populate fully — use the real data from the Phase 1 intelligence report above. NEVER output null, {}, or an empty intelligence object. All lineup players, coach names, weather, and referee details are available in the Phase 1 report.
+
 {
   "team1":"[Home Team]","team2":"[Away Team]","competition":"[Competition]","venue":"stadium or TBD",
+  "intelligence":{
+    "team1Lineup":["GK: Name","RB: Name","CB: Name","CB: Name","LB: Name","CM: Name","CM: Name","CM: Name","RW: Name","ST: Name","LW: Name"],
+    "team2Lineup":["GK: Name","RB: Name","CB: Name","CB: Name","LB: Name","CM: Name","CM: Name","CM: Name","RW: Name","ST: Name","LW: Name"],
+    "team1Formation":"4-3-3",
+    "team2Formation":"4-2-3-1",
+    "coaching":{
+      "team1Coach":{"name":"Real name","tacticalStyle":"brief style","formation":"4-3-3","tenure":"e.g. 8 months","experienceLevel":"Veteran/Experienced/First-time","pressureStatus":"brief status","playerSentiment":"brief note or null"},
+      "team2Coach":{"name":"Real name","tacticalStyle":"brief style","formation":"4-2-3-1","tenure":"brief","experienceLevel":"brief","pressureStatus":"brief","playerSentiment":"brief or null"}
+    },
+    "keyPlayerNotes":{
+      "suspensionRisk":[{"player":"Real name","team":"[Team]","note":"one yellow from ban"}],
+      "setPieceTakers":{"team1":{"corners":"Name or null","freeKicks":"Name or null","penalties":"Name or null"},"team2":{"corners":"Name or null","freeKicks":"Name or null","penalties":"Name or null"}},
+      "goalkeeperNote":"backup keeper note or null",
+      "squadStability":"recent signing/unrest note or null"
+    },
+    "weather":{"condition":"Clear","temperature":"18°C","wind":"12 km/h","humidity":"60%","impact":"Minimal"},
+    "referee":{"name":"Real name","nationality":"Country","avgCardsPerGame":4.2,"avgYellowPerGame":3.9,"avgRedPerGame":0.15,"penaltyRate":"12%","homeBias":"Neutral","impactNote":"brief note"},
+    "xGData":{"team1AvgXGFor":1.82,"team1AvgXGAgainst":1.12,"team2AvgXGFor":1.35,"team2AvgXGAgainst":1.45,"xGNote":"brief note"},
+    "travelFatigue":{"team1LastMatch":"3 days ago, home","team2LastMatch":"4 days ago, away","fatigueImpact":"brief"},
+    "oddsMovement":"brief movement note or null"
+  },
   "winProbabilities":{"team1":52,"draw":24,"team2":24},
   "expectedGoals":{"team1":1.6,"team2":1.1},
   "mainPrediction":{"market":"1X2","pick":"W1","odds":2.10,"confidence":68,"value":true},
@@ -1014,27 +1038,6 @@ After reasoning, output ONLY a valid JSON object (NO markdown, NO code fences (n
     {"bookmaker":"William Hill","w1":2.00,"draw":3.50,"w2":3.30,"over25":1.88,"under25":1.92,"bttsY":1.78,"bttsN":1.97},
     {"bookmaker":"Betway","w1":2.15,"draw":3.65,"w2":3.15,"over25":1.95,"under25":1.86,"bttsY":1.82,"bttsN":1.93}
   ],
-  "intelligence":{
-    "team1Lineup":["GK: Name","RB: Name","CB: Name","CB: Name","LB: Name","CM: Name","CM: Name","CM: Name","RW: Name","ST: Name","LW: Name"],
-    "team2Lineup":["GK: Name","RB: Name","CB: Name","CB: Name","LB: Name","CM: Name","CM: Name","CM: Name","RW: Name","ST: Name","LW: Name"],
-    "team1Formation":"4-3-3",
-    "team2Formation":"4-2-3-1",
-    "coaching":{
-      "team1Coach":{"name":"Coach Name or null","tacticalStyle":"e.g. possession-based, high-press","formation":"4-3-3","tenure":"e.g. appointed 8 months ago","experienceLevel":"Veteran — 10+ years senior management OR First-time senior manager OR Experienced — 3-5 years","pressureStatus":"e.g. Under pressure after 3 straight losses OR Secure, recently extended contract OR Too early to assess","playerSentiment":"e.g. Reports of dressing-room unrest OR Strong squad support reported OR No reporting found either way"},
-      "team2Coach":{"name":"Coach Name or null","tacticalStyle":"brief style descriptor","formation":"4-2-3-1","tenure":"tenure descriptor","experienceLevel":"experience descriptor","pressureStatus":"pressure descriptor","playerSentiment":"sentiment descriptor"}
-    },
-    "keyPlayerNotes":{
-      "suspensionRisk":[{"player":"Real player name","team":"[Home Team]","note":"One yellow card from a one-match ban"}],
-      "setPieceTakers":{"team1":{"corners":"Player name or null","freeKicks":"Player name or null","penalties":"Player name or null"},"team2":{"corners":"Player name or null","freeKicks":"Player name or null","penalties":"Player name or null"}},
-      "goalkeeperNote":"e.g. Backup keeper starting in place of injured #1 OR null if regular starter confirmed",
-      "squadStability":"e.g. New signing started his first match this week OR null if nothing notable"
-    },
-    "weather":{"condition":"Clear","temperature":"18°C","wind":"12 km/h","humidity":"60%","impact":"Minimal — good playing conditions"},
-    "referee":{"name":"Referee Name","nationality":"Country","avgCardsPerGame":4.2,"avgYellowPerGame":3.9,"avgRedPerGame":0.15,"penaltyRate":"12% of games","homeBias":"Neutral","impactNote":"Strict — expect bookings"},
-    "xGData":{"team1AvgXGFor":1.82,"team1AvgXGAgainst":1.12,"team2AvgXGFor":1.35,"team2AvgXGAgainst":1.45,"xGNote":"Team1 overperforms xG slightly"},
-    "travelFatigue":{"team1LastMatch":"3 days ago, home","team2LastMatch":"4 days ago, away","fatigueImpact":"Slight edge to Team1"},
-    "oddsMovement":"Market opened [Home Team] at 2.40, now 2.10 — significant smart money on home win"
-  },
   "correctScorePredictions":[
     {"score":"1-0","probability":18,"odds":5.5},
     {"score":"1-1","probability":12,"odds":6.5},
@@ -1770,7 +1773,7 @@ async function doAnalyze(forceRefresh=false){
       // verification, referee neutrality, weather, stakes language, form
       // priority, rotation, on top of lineup/injury corroboration) and
       // needs more room to complete without truncating.
-      intel = await callAI(intelPrompt, 10500, true, "", "claude-haiku-4-5-20251001");
+      intel = await callAI(intelPrompt, 16000, true, "", "claude-haiku-4-5-20251001");
     }catch(e){
       if(e.message==="__TRUNCATED__"){
         // Retry with an explicit compactness instruction, not just a
@@ -1780,7 +1783,7 @@ async function doAnalyze(forceRefresh=false){
         toast("Optimising research length — retrying...", 3000);
         const compactIntelPrompt = intelPrompt +
           "\n\nCRITICAL: Previous attempt was too long and got cut off. Be far more concise — short factual bullet points only, no elaboration, no repeated context. Prioritise: LINEUPS tag, DATA tag, confirmed/predicted XI names, then brief H2H/referee/weather notes. Skip anything non-essential.";
-        intel = await callAI(compactIntelPrompt, 8400, true, "", "claude-haiku-4-5-20251001");
+        intel = await callAI(compactIntelPrompt, 12000, true, "", "claude-haiku-4-5-20251001");
       } else { throw e; }
     }
 
@@ -1810,7 +1813,7 @@ async function doAnalyze(forceRefresh=false){
     const _staticBlock={type:"text",text:PHASE2_STATIC_PROMPT,cache_control:{type:"ephemeral"}};
     let rawAnalysis;
     try{
-      rawAnalysis = await callAI([_staticBlock,{type:"text",text:analysisPrompt}], 19000, false, ANALYST_SYSTEM, "claude-sonnet-4-6", 0.2);
+      rawAnalysis = await callAI([_staticBlock,{type:"text",text:analysisPrompt}], 16000, false, ANALYST_SYSTEM, "claude-sonnet-4-6", 0.2);
     }catch(e){
       if(e.message==="__TRUNCATED__"){
         // Response was cut off — retry asking for more compact output
@@ -1818,8 +1821,8 @@ async function doAnalyze(forceRefresh=false){
         const retryDynamic = analysisPrompt +
           "\n\nCRITICAL: Previous attempt was too long and got cut off. "+
           "Be extremely concise. Limit reasoning fields to 8 words max. "+
-          "Skip oddsComparison array entirely (use []). Output valid complete JSON under 6000 tokens.";
-        rawAnalysis = await callAI([_staticBlock,{type:"text",text:retryDynamic}], 19000, false, ANALYST_SYSTEM, "claude-sonnet-4-6", 0.2);
+          "Skip oddsComparison array entirely (use []). The intelligence object MUST still be fully populated — do not null it. Output valid complete JSON under 6000 tokens.";
+        rawAnalysis = await callAI([_staticBlock,{type:"text",text:retryDynamic}], 16000, false, ANALYST_SYSTEM, "claude-sonnet-4-6", 0.2);
       } else { throw e; }
     }
 
@@ -1837,7 +1840,7 @@ async function doAnalyze(forceRefresh=false){
         const repairPrompt=
           `The JSON below has a syntax error. Return ONLY the corrected valid JSON with no other text:\n\n`+
           rawAnalysis.slice(0,7000);
-        const fixedRaw=await callAI(repairPrompt,4000,false,"","claude-haiku-4-5-20251001");
+        const fixedRaw=await callAI(repairPrompt,6000,false,"","claude-haiku-4-5-20251001");
         p=parseJSON(fixedRaw);
         if(!p)throw new Error("Could not repair JSON. Please try again.");
       } else { throw e; }
@@ -2795,7 +2798,7 @@ List at most the 15 most relevant real fixtures found, ordered by date — but i
       parsed=parseJSON(raw);
     }catch(e2){
       if(e2.message==="__MALFORMED__"){
-        const fixed=await callAI(`Fix this malformed JSON, return ONLY the corrected JSON with no other text:\n\n${raw.slice(0,4000)}`,2000,false,"","claude-haiku-4-5-20251001");
+        const fixed=await callAI(`Fix this malformed JSON, return ONLY the corrected JSON with no other text:\n\n${raw.slice(0,4000)}`,3000,false,"","claude-haiku-4-5-20251001");
         parsed=parseJSON(fixed);
       }else{throw e2}
     }

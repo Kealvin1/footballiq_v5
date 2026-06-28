@@ -1033,11 +1033,7 @@ CRITICAL: The "intelligence" object is the FIRST thing you must populate fully �
     {"pick":"1/X","odds":6.00,"probability":12,"reasoning":"home side fades"},
     {"pick":"2/2","odds":5.50,"probability":10,"reasoning":"away team form"}
   ],
-  "oddsComparison":[
-    {"bookmaker":"Bet365","w1":2.05,"draw":3.55,"w2":3.25,"over25":1.90,"under25":1.90,"bttsY":1.83,"bttsN":1.92},
-    {"bookmaker":"William Hill","w1":2.00,"draw":3.50,"w2":3.30,"over25":1.88,"under25":1.92,"bttsY":1.78,"bttsN":1.97},
-    {"bookmaker":"Betway","w1":2.15,"draw":3.65,"w2":3.15,"over25":1.95,"under25":1.86,"bttsY":1.82,"bttsN":1.93}
-  ],
+  "oddsComparison":[],
   "correctScorePredictions":[
     {"score":"1-0","probability":18,"odds":5.5},
     {"score":"1-1","probability":12,"odds":6.5},
@@ -1680,7 +1676,7 @@ ${intel.slice(0,3000)}
 What are your win probabilities for ${t1} (home/team1) vs Draw vs ${t2} (away/team2)? Give your own independent read — don't just repeat round numbers. Return ONLY this JSON, nothing else:
 {"team1":NN,"draw":NN,"team2":NN}`;
 
-    const raw=await callAI(checkPrompt,300,false,"",  "claude-sonnet-4-6", 0.2);
+    const raw=await callAI(checkPrompt,300,false,"","claude-haiku-4-5-20251001",0);
     const check=parseJSON(raw);
     if(!check||typeof check.team1!=="number")return p;
 
@@ -1773,7 +1769,7 @@ async function doAnalyze(forceRefresh=false){
       // verification, referee neutrality, weather, stakes language, form
       // priority, rotation, on top of lineup/injury corroboration) and
       // needs more room to complete without truncating.
-      intel = await callAI(intelPrompt, 16000, true, "", "claude-haiku-4-5-20251001");
+      intel = await callAI(intelPrompt, 10000, true, INTEL_SYSTEM, "claude-haiku-4-5-20251001");
     }catch(e){
       if(e.message==="__TRUNCATED__"){
         // Retry with an explicit compactness instruction, not just a
@@ -1783,7 +1779,7 @@ async function doAnalyze(forceRefresh=false){
         toast("Optimising research length — retrying...", 3000);
         const compactIntelPrompt = intelPrompt +
           "\n\nCRITICAL: Previous attempt was too long and got cut off. Be far more concise — short factual bullet points only, no elaboration, no repeated context. Prioritise: LINEUPS tag, DATA tag, confirmed/predicted XI names, then brief H2H/referee/weather notes. Skip anything non-essential.";
-        intel = await callAI(compactIntelPrompt, 12000, true, "", "claude-haiku-4-5-20251001");
+        intel = await callAI(compactIntelPrompt, 8000, true, INTEL_SYSTEM, "claude-haiku-4-5-20251001");
       } else { throw e; }
     }
 
@@ -1962,6 +1958,10 @@ function extractRefereeName(intel){
   return null;
 }
 
+// Phase 1 system prompt — keeps Haiku in structured, concise mode.
+// Empty system was letting it write verbose prose; this forces bullet-point factual output.
+const INTEL_SYSTEM="You are a football intelligence analyst. Be maximally concise. Output structured factual bullet points only — no preamble, no elaboration, no restating context. Total output target: under 6,000 tokens.";
+
 function buildIntelPrompt(t1,t2,comp,xg1,xg2,movement){
 
   // Build real-data injection block
@@ -2113,7 +2113,7 @@ DATA: RICH ✓ (or LIMITED ~ or MINIMAL ✗) — one sentence why
 
 Then provide your full intelligence report below those two lines.
 
-Be specific — real player names, exact scores, real statistics only. Given the breadth of what's being asked, write efficiently: short factual statements rather than elaborated prose, no repeating context already stated, no restating the same point under multiple headings. Aim to cover every required element above concisely rather than covering fewer elements at length.`;
+Be specific — real player names, exact scores, real statistics only. Write efficiently: short factual bullet points, not prose. State each fact once, never repeat it under another heading. Aim to cover every required element concisely. HARD CAP: your entire response (including the mandatory first two lines) must not exceed 6,000 tokens — prioritise lineups and injury data, compress H2H and form to score-lines only.`;
 }
 
 // ── CALIBRATION MEMO — feeds prediction history back into Phase 2 ──
@@ -2255,6 +2255,12 @@ function buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,tier,richness,cor
   // Phase 2 prompt. The static methodology + JSON schema (PHASE2_STATIC_PROMPT)
   // is sent as a separate, cached content block — see callAI's array-content
   // support and the doAnalyze call site for how the two are combined.
+  // Slice intel to ~6,000 token equivalent (24,000 chars @ ~4 chars/token).
+  // LINEUPS/DATA tags and player names are always output first by Phase 1,
+  // so slicing preserves the most critical data for the intelligence object.
+  // Phase 2 also receives xG, corners, and referee data in dedicated blocks below.
+  const intelSliced = intel.length > 24000 ? intel.slice(0, 24000) + "\n[Report truncated — see xG/referee blocks below for supplementary data]" : intel;
+
   return`Here is the pre-match intelligence gathered for ${t1} vs ${t2} (${comp}):
 
 === DATA TIER: ${tier===1?"TIER 1":tier===2?"TIER 2":"TIER 3"} ===
@@ -2268,7 +2274,7 @@ ${richness==="rich"?"Real data was found for both teams in this specific matchup
 COMBINED CALIBRATION RULE: Apply whichever cap is LOWER between the tier-based cap and the richness-based cap above. Tier tells you about the competition in general; richness tells you about THIS match specifically — always defer to the more cautious of the two.
 
 === INTELLIGENCE REPORT ===
-${intel}
+${intelSliced}
 === END REPORT ===
 
 ${refStats?`=== REAL REFEREE STATISTICS (${refStats.matches} matches this season) ===

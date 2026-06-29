@@ -788,7 +788,14 @@ select option{background:var(--card2)}
       <div class="action-bar" id="action-bar"></div>
     </div>
 
-    <div class="an-note hidden" id="an-note"><div class="an-lbl"><i class="ti ti-brain"></i> ANALYST NOTE</div><p id="an-txt"></p></div>
+    <div class="an-note hidden" id="an-note">
+  <div class="an-lbl" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+    <span><i class="ti ti-brain"></i> ANALYST NOTE</span>
+    <span id="an-qs" style="cursor:pointer" onclick="toggleAnQS()" title="Click to see analysis quality breakdown"></span>
+  </div>
+  <div id="an-qs-breakdown" style="display:none;margin-top:10px;padding:10px 12px;background:var(--bg2);border-radius:8px;border:1px solid var(--border)"></div>
+  <p id="an-txt"></p>
+</div>
     <div class="cot-box hidden" id="cot-box"><div class="cot-lbl"><i class="ti ti-list-details" style="color:var(--em);margin-right:4px"></i> CHAIN-OF-THOUGHT REASONING</div><div class="cot-txt" id="cot-txt"></div></div>
 
     <div class="tabs">
@@ -1827,7 +1834,26 @@ async function doAnalyze(forceRefresh=false){
 
     const _tier=getCompTier(comp);
     const _richness=dataRichness; // already computed above — avoid duplicate call
-    const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,_tier,_richness,cornerStats,poissonPrior,cornerPoissonPrior,movementClass);
+
+    // ── Poisson upgrade: if Phase 0 xG was null (national teams / Tier 2/3),
+    //    extract tournament xG from Phase 1 intel text and re-run the model ──
+    let _finalPoissonPrior = poissonPrior;
+    // Upgrade Poisson source if Phase 1 found better xG data:
+    //   no prior at all  → extract → xG-research
+    //   "goals" source   → try to upgrade to xG-research (Phase 1 xG > API-Football goal avg)
+    //   "xG" source      → keep (Understat is best quality, no upgrade needed)
+    if((!poissonPrior || poissonPrior.source==="goals") && intel){
+      const extracted = extractXGFromIntel(intel, t1, t2);
+      if(extracted){
+        const upgraded = computePoissonPrior(extracted.lH, extracted.lA, "xG-research");
+        if(upgraded){
+          _finalPoissonPrior = upgraded;
+          console.log(`Poisson upgraded to xG-research: ${t1} λ=${extracted.lH}, ${t2} λ=${extracted.lA}`);
+        }
+      }
+    }
+
+    const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,_tier,_richness,cornerStats,_finalPoissonPrior,cornerPoissonPrior,movementClass);
     // Static methodology+schema block is identical on every Phase 2 call —
     // marking it cacheable saves ~90% on this ~2300-token block for any
     // repeat call within the cache window (e.g. retries, or scouting
@@ -1880,7 +1906,7 @@ async function doAnalyze(forceRefresh=false){
     p._movement = lineMovement;
     p._lineupStatus = lineupStatus;
     p._tier = _tier;
-    p._poissonPrior = poissonPrior;
+    p._poissonPrior = _finalPoissonPrior || poissonPrior; // prefer upgraded version
     p._cornerPoissonPrior = cornerPoissonPrior;
     p._movementClass = movementClass;
     p._dataRichness = dataRichness;
@@ -2136,11 +2162,12 @@ OVERALL DATA RICHNESS VERDICT (apply the most cautious individual factor):
 → LIMITED ~: ANY factor is LIMITED (even if others are rich)
 → MINIMAL ✗: ANY factor is MINIMAL (even if the competition is prestigious)
 
-MANDATORY OUTPUT FORMAT — write these as the very first two lines of your response, exactly in this format:
+MANDATORY OUTPUT FORMAT — write these as the very first THREE lines of your response, exactly in this format:
 LINEUPS: VERIFIED ✓✓ (or CONFIRMED-SINGLE ✓ or PREDICTED ~) — one sentence stating how many sources agreed and why
 DATA: RICH ✓ (or LIMITED ~ or MINIMAL ✗) — one sentence why
+XG: [home_team_name]=X.XX [away_team_name]=X.XX — tournament/season xG averages per game from your research (e.g. XG: Germany=2.25 Paraguay=0.62). Write null for any team where you found no reliable xG figure.
 
-Then provide your full intelligence report below those two lines.
+Then provide your full intelligence report below those three lines.
 
 Be specific — real player names, exact scores, real statistics only. Write efficiently: short factual bullet points, not prose. State each fact once, never repeat it under another heading. Aim to cover every required element concisely.
 
@@ -2161,6 +2188,147 @@ HARD CAP: your entire response must not exceed 6,000 tokens — prioritise lineu
 }
 
 // ── CALIBRATION MEMO — feeds prediction history back into Phase 2 ──
+
+
+// ═══════════════════════════════════════════════════════════
+//  ANALYSIS QUALITY SCORE — 0 to 100
+//  Measures how fact-driven and data-rich the prediction is,
+//  NOT confidence in the prediction outcome itself.
+// ═══════════════════════════════════════════════════════════
+function computeAnalysisQualityScore(p){
+  let score=0;
+  const bk=[];
+
+  // ① Competition tier — determines underlying database quality
+  const tier=p._tier||getCompTier(p.competition)||3;
+  if(tier===1){
+    score+=40;
+    bk.push({label:"Competition tier",pts:"+40",note:"Tier 1 — real xG, referee & corner databases"});
+  }else if(tier===2){
+    score+=25;
+    bk.push({label:"Competition tier",pts:"+25",note:"Tier 2 — AI web research, no Understat xG"});
+  }else{
+    score+=10;
+    bk.push({label:"Competition tier",pts:"+10",note:"Tier 3 — limited statistical coverage"});
+  }
+
+  // ② Lineup verification
+  const ls=p._lineupStatus||"predicted";
+  if(ls==="verified"){
+    score+=20;
+    bk.push({label:"Lineups",pts:"+20",note:"Verified (2+ independent sources confirmed)"});
+  }else if(ls==="confirmed"){
+    score+=12;
+    bk.push({label:"Lineups",pts:"+12",note:"Confirmed (1 source — treat as reliable)"});
+  }else{
+    score+=3;
+    bk.push({label:"Lineups",pts:"+3",note:"Predicted — not yet officially released"});
+  }
+
+  // ③ Match data richness (Phase 1 output quality)
+  const dr=p._dataRichness||"minimal";
+  if(dr==="rich"){
+    score+=15;
+    bk.push({label:"Match intelligence",pts:"+15",note:"Rich — full H2H, form, team news & context"});
+  }else if(dr==="limited"){
+    score+=8;
+    bk.push({label:"Match intelligence",pts:"+8",note:"Limited — some data gaps in research"});
+  }else{
+    score+=2;
+    bk.push({label:"Match intelligence",pts:"+2",note:"Minimal — sparse data, higher uncertainty"});
+  }
+
+  // ④ Statistical model (Poisson)
+  const pp=p._poissonPrior;
+  if(pp?.source==="xG"){
+    score+=10;
+    bk.push({label:"Statistical model",pts:"+10",note:"Dixon-Coles Poisson anchored to real Understat xG"});
+  }else if(pp?.source==="xG-research"){
+    score+=8;
+    bk.push({label:"Statistical model",pts:"+8",note:"Poisson anchored to tournament xG extracted from Phase 1 research"});
+  }else if(pp?.source==="goals"){
+    score+=5;
+    bk.push({label:"Statistical model",pts:"+5",note:"Poisson anchored to season goal averages (indicative)"});
+  }else{
+    bk.push({label:"Statistical model",pts:"+0",note:"No Poisson model — insufficient data"});
+  }
+
+  // ⑤ Live market odds
+  if(p._liveOdds){
+    score+=7;
+    bk.push({label:"Market odds",pts:"+7",note:"Live odds matched — market pricing informs value assessment"});
+  }else{
+    bk.push({label:"Market odds",pts:"+0",note:"No live odds — value edge cannot be independently verified"});
+  }
+
+  // ⑥ Corner Poisson model
+  if(p._cornerPoissonPrior){
+    score+=5;
+    bk.push({label:"Corner model",pts:"+5",note:"Poisson corner probability model active"});
+  }else{
+    bk.push({label:"Corner model",pts:"+0",note:"No corner model — corner data unavailable"});
+  }
+
+  // ⑦ Line movement intelligence
+  if(p._movementClass){
+    score+=3;
+    bk.push({label:"Line movement",pts:"+3",note:`${p._movementClass.classification} money detected — market intelligence available`});
+  }else{
+    bk.push({label:"Line movement",pts:"+0",note:"No line movement data"});
+  }
+
+  return{score:Math.min(score,100),breakdown:bk,tier};
+}
+
+function _qsColor(s){return s>=85?"#00c896":s>=65?"#ffb830":s>=40?"#ff8c42":"#ff4d6a";}
+function _qsLabel(s){return s>=85?"Strong":s>=65?"Good":s>=40?"Moderate":"Weak";}
+
+function renderQualityBadge(qs){
+  const col=_qsColor(qs.score);
+  const stars=Math.round(qs.score/20);
+  const filled="★".repeat(stars)+"☆".repeat(5-stars);
+  const label=qs.score>=85?"Strong":qs.score>=65?"Good":qs.score>=40?"Moderate":"Weak";
+  return`<span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 10px;border-radius:5px;background:${col}18;border:1px solid ${col}44">
+    <span style="font-weight:800;color:${col};font-size:13px">${qs.score}</span>
+    <span style="color:var(--t3);font-size:9px">/100</span>
+    <span style="color:${col};letter-spacing:1px;font-size:9px">${filled}</span>
+    <span style="color:var(--t2);font-size:10px">${label}</span>
+  </span>`;
+}
+
+function renderQualityBreakdown(qs){
+  const col=_qsColor(qs.score);
+  const barW=Math.round(qs.score);
+  const rows=qs.breakdown.map(b=>{
+    const pos=!b.pts.startsWith("+0");
+    return`<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:4px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--text)">${b.label}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:1px">${b.note}</div>
+      </div>
+      <div style="font-size:11px;font-weight:700;color:${pos?col:"var(--t3)"};white-space:nowrap;margin-left:12px">${b.pts}</div>
+    </div>`;}).join("");
+  return`<div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.05em">ANALYSIS QUALITY BREAKDOWN</div>
+      <div style="font-size:11px;font-weight:800;color:${col}">${qs.score}/100</div>
+    </div>
+    <div style="background:var(--border);border-radius:3px;height:4px;margin-bottom:12px">
+      <div style="background:${col};width:${barW}%;height:4px;border-radius:3px;transition:width .4s ease"></div>
+    </div>
+    ${rows}
+    <div style="font-size:10px;color:var(--t3);margin-top:8px;font-style:italic">
+      This score measures data quality and verifiability — not prediction confidence.
+      A 100/100 requires Tier 1 competition + verified lineups + Poisson xG + live odds + corners + movement.
+    </div>
+  </div>`;
+}
+
+function toggleAnQS(){
+  const el=$("an-qs-breakdown");
+  if(!el)return;
+  el.style.display=el.style.display==="none"?"block":"none";
+}
 
 // ═══════════════════════════════════════════════════════════
 //  ELITE LAYER 1 — Dixon-Coles Poisson Statistical Model
@@ -2225,7 +2393,7 @@ function buildPoissonBlock(pr,cp,t1,t2){
   const rows=pr.topScores.map(s=>`${s.sc}(${s.pct}%)`).join(" · ");
   return `
 === STATISTICAL PRIOR — DIXON-COLES POISSON MODEL ===
-Source: ${pr.source==="xG"?"Understat real xG averages (high reliability)":"API-Football season goal averages (indicative)"}
+Source: ${pr.source==="xG"?"Understat real xG averages (high reliability)":pr.source==="xG-research"?"Phase 1 research xG — tournament averages (good reliability)":"API-Football season goal averages (indicative)"}
 Expected goals:  ${t1} λ=${pr.lH}  |  ${t2} λ=${pr.lA}  |  Total λ=${pr.total}
 
 Win probabilities (model):
@@ -2250,7 +2418,15 @@ ${pr.source==="xG"?`ANCHOR RULES — HIGH CONFIDENCE (source: real xG data from 
    confirmed key injury, strong venue effect, or clear tactical mismatch.
 3. BTTS/Over-Under: start from model values, adjust ≤10pp for team news.
 4. Every deviation >12pp requires explicit justification in chainOfThought.
-5. These are priors — qualitative intelligence refines them, it does not replace them.`:`ANCHOR RULES — ADVISORY (source: season goal averages, not xG):
+5. These are priors — qualitative intelligence refines them, it does not replace them.`
+:pr.source==="xG-research"?`ANCHOR RULES — GOOD CONFIDENCE (source: tournament xG from Phase 1 research):
+1. These lambdas come from xG figures your web research found for this specific tournament.
+   They are more reliable than season goal averages and directionally trustworthy.
+2. winProbabilities should stay within 15pp of model values. Deviate for confirmed key
+   injuries, clear tactical mismatches, or H2H evidence that contradicts the model.
+3. BTTS/Over-Under: use model as baseline, adjust ≤12pp for team news and context.
+4. These are good priors — intelligence above refines them, it does not replace them.`
+:`ANCHOR RULES — ADVISORY (source: season goal averages, not xG):
 1. These probabilities use goal averages which include all competitions, possibly friendlies.
 2. Use them as a directional starting point, NOT as a rigid constraint. Treat 15-20pp
    deviations as acceptable when qualitative evidence is strong (confirmed lineups, clear
@@ -2320,6 +2496,45 @@ async function fetchTeamStats(t1, t2, comp){
     if(!r.ok)return null;
     return await r.json();
   }catch{return null;}
+}
+
+
+// ── Extract xG from Phase 1 intel text (for Tier 2/3 Poisson fallback) ──────
+// Phase 1 outputs a mandatory "XG: [team1]=X.XX [team2]=X.XX" line.
+// We parse it here and use it as Poisson lambda when Understat xG is unavailable.
+function extractXGFromIntel(intel, t1, t2){
+  if(!intel) return null;
+  // Match the mandatory XG: line: "XG: Germany=2.25 Paraguay=0.62"
+  // or "XG: Germany=2.25 Paraguay=null" etc.
+  const line = intel.split("\n").find(l => l.trim().toLowerCase().startsWith("xg:"));
+  if(!line) return null;
+
+  const parse = (teamName) => {
+    // Try "TeamName=X.XX" format
+    const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g,"");
+    const nTeam = norm(teamName);
+    // Match patterns like "Germany=2.25", "Brazil=1.83"
+    const parts = line.split(/\s+/);
+    for(const part of parts){
+      const eqIdx = part.indexOf("=");
+      if(eqIdx < 0) continue;
+      const key = norm(part.slice(0, eqIdx));
+      const val = part.slice(eqIdx+1);
+      if(val.toLowerCase().replace(/[.,;)]/g,"").trim()==="null") continue; // handle null, null., NULL etc.
+      // Accept only if the key is a substring of the team name (NOT reverse — avoids cross-matches)
+      // e.g. key="ger" matches nTeam="germany" ✓  but key="southkorea" never matches nTeam="korearepublic" ✓
+      if(key.length >= 3 && nTeam.includes(key)){
+        const num = parseFloat(val);
+        if(!isNaN(num) && num >= 0.15 && num <= 5.0) return num;
+      }
+    }
+    return null;
+  };
+
+  const lH = parse(t1);
+  const lA = parse(t2);
+  if(!lH || !lA) return null;
+  return { lH, lA };
 }
 
 function getCalibrationMemo(targetTier, comp){
@@ -2592,7 +2807,16 @@ function renderResults(p,fromCache){
   const _cacheLabel=_cacheAge>0?`<span class="cache-tag"><i class="ti ti-clock" style="font-size:10px"></i> Cached ${_cacheAge<60?_cacheAge+"m ago":Math.round(_cacheAge/60)+"h ago"}</span>`:"";
   html("action-bar",`<button class="btn-sm" onclick="addToAcca()"><i class="ti ti-plus"></i> Add Top Pick to Acca</button><button class="btn-ghost" onclick="refreshAnalysis()" title="Clear cache and re-run with latest data" style="font-size:11px;padding:6px 13px"><i class="ti ti-refresh-alert"></i> Refresh</button><button class="btn-ghost" onclick="addToAlerts()" title="Get notified when lineups drop for this match" style="font-size:11px;padding:6px 13px"><i class="ti ti-bell"></i> Alert</button><button class="btn-ghost" onclick="sharePredict()" style="font-size:11px;padding:6px 13px"><i class="ti ti-share"></i> Share</button>${_cacheLabel}`);
 
-  if(p.analystNote){show("an-note");txt("an-txt",p.analystNote)}else hide("an-note");
+  if(p.analystNote){
+    show("an-note");
+    txt("an-txt",p.analystNote);
+    // Compute and render analysis quality score
+    const _qs=computeAnalysisQualityScore(p);
+    html("an-qs", renderQualityBadge(_qs));
+    html("an-qs-breakdown", renderQualityBreakdown(_qs));
+    // Attach score to p so it can be referenced later
+    p._qualityScore=_qs.score;
+  }else hide("an-note");
   if(p.chainOfThought){show("cot-box");txt("cot-txt",p.chainOfThought)}else hide("cot-box");
   txt("r-disc",p.disclaimer?`⚠ ${p.disclaimer}`:"");
   $("save-btn").disabled=false;$("save-btn").innerHTML=`<i class="ti ti-bookmark"></i> Save prediction`;
@@ -2613,7 +2837,7 @@ function buildAllTabs(p,c1,c2){
     const diff2 = (mvs?.team2 != null) ? Math.abs(pr.aw - mvs.team2) : null;
     const topS=pr.topScores.slice(0,6).map(s=>`<span style="font-size:11px;padding:3px 8px;border-radius:4px;background:var(--card2);color:var(--t2)">${s.sc} <b style="color:var(--text)">${s.pct}%</b></span>`).join(" ");
     ov+=`<div class="mb16">
-      <div class="sec-ttl"><i class="ti ti-math-function"></i> Statistical Model — Dixon-Coles Poisson <span style="font-size:10px;font-weight:400;color:var(--t3);margin-left:6px">λ home=${pr.lH} | λ away=${pr.lA} | λ total=${pr.total}</span><span style="font-size:9px;padding:1px 6px;border-radius:3px;margin-left:8px;background:${pr.source==="xG"?"rgba(0,200,150,0.12)":"rgba(255,184,48,0.1)"};color:${pr.source==="xG"?"#00c896":"#ffb830"}">${pr.source==="xG"?"xG source":"goal avg source"}</span></div>
+      <div class="sec-ttl"><i class="ti ti-math-function"></i> Statistical Model — Dixon-Coles Poisson <span style="font-size:10px;font-weight:400;color:var(--t3);margin-left:6px">λ home=${pr.lH} | λ away=${pr.lA} | λ total=${pr.total}</span><span style="font-size:9px;padding:1px 6px;border-radius:3px;margin-left:8px;background:${pr.source==="xG"?"rgba(0,200,150,0.12)":pr.source==="xG-research"?"rgba(0,200,150,0.08)":"rgba(255,184,48,0.1)"};color:${pr.source==="xG"?"#00c896":pr.source==="xG-research"?"#5ec49e":"#ffb830"}">${pr.source==="xG"?"xG source":pr.source==="xG-research"?"research xG":"goal avg source"}</span></div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0">
         <div style="background:var(--card2);border-radius:8px;padding:10px;text-align:center">
           <div style="font-size:18px;font-weight:800;color:var(--gold)">${pr.hw}%</div>

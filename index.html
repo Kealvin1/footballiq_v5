@@ -906,10 +906,12 @@ select option{background:var(--card2)}
       <button class="tbtn active" id="atb-roi"   onclick="setATab('roi')"><i class="ti ti-trending-up"></i> ROI Tracker</button>
       <button class="tbtn"        id="atb-mkt"   onclick="setATab('mkt')"><i class="ti ti-chart-bar"></i> Market Accuracy</button>
       <button class="tbtn"        id="atb-cal"   onclick="setATab('cal')"><i class="ti ti-adjustments"></i> Calibration</button>
+      <button class="tbtn"        id="atb-clv"   onclick="setATab('clv')"><i class="ti ti-target-arrow"></i> CLV</button>
     </div>
     <div id="atc-roi"></div>
     <div id="atc-mkt" class="hidden"></div>
     <div id="atc-cal" class="hidden"></div>
+    <div id="atc-clv" class="hidden"></div>
   </div>
 </div>
 
@@ -1461,7 +1463,7 @@ function quickSaveMarket(arrName,idx){
   const hist=getLS(LS.HIST,[]);
   hist.unshift({id:Date.now()+"",addedAt:new Date().toISOString(),team1:p.team1,team2:p.team2,competition:p.competition,
     pick:`${market}: ${pick}`,market:market,odds:m.odds,
-    confidence:confidence,status:"pending"});
+    confidence:confidence,status:"pending",closingOdds:null,clv:null});
   setLS(LS.HIST,hist);
   toast(`Tracking: ${pick||"bet"} ✓`);
   // Re-render history if the user is currently on that page
@@ -1476,7 +1478,7 @@ function quickSaveVB(idx){
   const hist=getLS(LS.HIST,[]);
   hist.unshift({id:Date.now()+"",addedAt:new Date().toISOString(),team1:p.team1,team2:p.team2,competition:p.competition,
     pick:`${vb.market||"Market"}: ${vb.pick||""}`,market:vb.market||"Market",odds:vb.odds,
-    confidence:vb.confidence!=null?vb.confidence:null,status:"pending"});
+    confidence:vb.confidence!=null?vb.confidence:null,status:"pending",closingOdds:null,clv:null});
   setLS(LS.HIST,hist);
   toast(`Tracking: ${vb.pick||"bet"} ✓`);
   if($("page-history")?.classList.contains("active"))renderHistoryPage();
@@ -1738,11 +1740,15 @@ async function doAnalyze(forceRefresh=false){
     advanceSteps(0);
 
     // allSettled: one failed fetch won't kill the analysis
-    const [xg1res, xg2res, oddsRes, cornersRes] = await Promise.allSettled([
+    // Pre-check tier: only call team-stats for Tier 2/3 where Understat xG is unavailable.
+    // For Tier 1 (PL/La Liga etc.) xG data is richer and team-stats adds ~800ms latency for nothing.
+    const _preTier = getCompTier(comp);
+    const [xg1res, xg2res, oddsRes, cornersRes, teamStatsRes] = await Promise.allSettled([
       fetchXGData(t1, comp),
       fetchXGData(t2, comp),
       fetchLiveOddsProxy(comp),
       fetchTeamCornerStats(t1, t2, comp),
+      _preTier >= 2 ? fetchTeamStats(t1, t2, comp) : Promise.resolve(null), // Tier 2/3 only
     ]);
 
     // Done with Phase 0
@@ -1753,10 +1759,30 @@ async function doAnalyze(forceRefresh=false){
     const liveOdds = oddsProxy?.games || null;
     const lineMovement = oddsProxy?.movement || null;
     const cornerStats = cornersRes.status==="fulfilled" ? cornersRes.value : null;
+    const teamStats = teamStatsRes.status==="fulfilled" ? teamStatsRes.value : null;
+
+    // ── Poisson prior: prefer Understat xG (Tier 1), fall back to API-Football goals ──
+    const _lH = xg1?.home_avg_xGF || teamStats?.team1?.home_goals_for_avg || null;
+    const _lA = xg2?.away_avg_xGF || teamStats?.team2?.away_goals_for_avg || null;
+    // Track source quality: xG (Understat, high quality) vs goals (API-Football, includes friendlies)
+    const _poissonSrc = (xg1?.home_avg_xGF && xg2?.away_avg_xGF) ? "xG"
+                       : (_lH && _lA) ? "goals" : null;
+    const poissonPrior = computePoissonPrior(_lH, _lA, _poissonSrc);
+
+    // Corner Poisson: use home/away specific averages
+    const _c1For = cornerStats?.team1?.home_corners_for ?? cornerStats?.team1?.corners_for_per_game;
+    const _c2For = cornerStats?.team2?.away_corners_for ?? cornerStats?.team2?.corners_for_per_game;
+    const cornerPoissonPrior = computeCornerPoisson(_c1For, _c2For);
+
+    // Line movement sharp/square classification
+    const movementClass = classifyMovementSharpness(lineMovement);
 
     // Log what we got
     console.log("Real data loaded:",
-      {xg1_ok:!!xg1, xg2_ok:!!xg2, odds_ok:!!liveOdds, movement_ok:!!lineMovement, corners_ok:!!cornerStats});
+      {xg1_ok:!!xg1, xg2_ok:!!xg2, odds_ok:!!liveOdds, movement_ok:!!lineMovement,
+       corners_ok:!!cornerStats, teamStats_ok:!!teamStats,
+       poisson_ok:!!poissonPrior, cornerPoisson_ok:!!cornerPoissonPrior,
+       movementClass:movementClass?.classification||"none"});
 
     // ── PHASE 1: Intelligence gathering ──────────────────────────
     setPhase(1);curStep=0;renderSteps(0,1);
@@ -1801,7 +1827,7 @@ async function doAnalyze(forceRefresh=false){
 
     const _tier=getCompTier(comp);
     const _richness=dataRichness; // already computed above — avoid duplicate call
-    const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,_tier,_richness,cornerStats);
+    const analysisPrompt = buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,_tier,_richness,cornerStats,poissonPrior,cornerPoissonPrior,movementClass);
     // Static methodology+schema block is identical on every Phase 2 call —
     // marking it cacheable saves ~90% on this ~2300-token block for any
     // repeat call within the cache window (e.g. retries, or scouting
@@ -1854,6 +1880,9 @@ async function doAnalyze(forceRefresh=false){
     p._movement = lineMovement;
     p._lineupStatus = lineupStatus;
     p._tier = _tier;
+    p._poissonPrior = poissonPrior;
+    p._cornerPoissonPrior = cornerPoissonPrior;
+    p._movementClass = movementClass;
     p._dataRichness = dataRichness;
     curPred = p;
 
@@ -2113,10 +2142,186 @@ DATA: RICH ✓ (or LIMITED ~ or MINIMAL ✗) — one sentence why
 
 Then provide your full intelligence report below those two lines.
 
-Be specific — real player names, exact scores, real statistics only. Write efficiently: short factual bullet points, not prose. State each fact once, never repeat it under another heading. Aim to cover every required element concisely. HARD CAP: your entire response (including the mandatory first two lines) must not exceed 6,000 tokens — prioritise lineups and injury data, compress H2H and form to score-lines only.`;
+Be specific — real player names, exact scores, real statistics only. Write efficiently: short factual bullet points, not prose. State each fact once, never repeat it under another heading. Aim to cover every required element concisely.
+
+PLAYER PER-90 METRICS — search FBref.com or WhoScored for current season stats for the starting XI:
+  For each outfield player: xG/90, xA/90, progressive carries/90, shots/90, key passes/90
+  For each goalkeeper: save%, PSxG vs actual goals conceded, distribution quality
+  Format as: [Name] (pos): xG/90=X.XX xA/90=X.XX prog/90=X.X shots/90=X.X
+  Flag any player outperforming or underperforming their xG by >30% (lucky/unlucky form)
+  For national teams, use international caps stats OR club-season stats — whichever is more current
+
+SET-PIECE INTELLIGENCE — search for:
+  Expected goals from set pieces per match for each team (FBref "Set Piece xG" if available)
+  Corner delivery success rate and dominant aerial players
+  Free kick specialists and their accuracy in this competition
+  Recent set-piece goals scored or conceded (last 5 matches)
+
+HARD CAP: your entire response must not exceed 6,000 tokens — prioritise lineups, injuries and player metrics; compress H2H to score-lines only.`;
 }
 
 // ── CALIBRATION MEMO — feeds prediction history back into Phase 2 ──
+
+// ═══════════════════════════════════════════════════════════
+//  ELITE LAYER 1 — Dixon-Coles Poisson Statistical Model
+// ═══════════════════════════════════════════════════════════
+function _lfact(n){if(n<=1)return 0;let r=0;for(let i=2;i<=n;i++)r+=Math.log(i);return r;}
+function _pP(k,lam){if(lam<=0||k<0)return 0;return Math.exp(k*Math.log(lam)-lam-_lfact(k));}
+
+function computePoissonPrior(lH, lA, source){
+  if(!lH||!lA||isNaN(+lH)||isNaN(+lA))return null;
+  lH=+lH; lA=+lA;
+  if(lH<0.1||lA<0.1)return null;
+  const rho=-0.13; // Dixon-Coles 1997 low-score correction (empirical football value)
+  const maxG=9;
+  let hw=0,dr=0,aw=0,btts=0,o05=0,o15=0,o25=0,o35=0,o45=0,o55=0;
+  const scores=[];
+  for(let i=0;i<=maxG;i++){
+    for(let j=0;j<=maxG;j++){
+      let p=_pP(i,lH)*_pP(j,lA);
+      // DC correction for low-scoring results
+      let tau=1;
+      if(i===0&&j===0)tau=1-rho*lH*lA;
+      else if(i===1&&j===0)tau=1+rho*lA;
+      else if(i===0&&j===1)tau=1+rho*lH;
+      else if(i===1&&j===1)tau=1-rho;
+      p*=tau;
+      scores.push({h:i,a:j,p});
+      if(i>j)hw+=p; else if(i===j)dr+=p; else aw+=p;
+      const t=i+j;
+      if(i>0&&j>0)btts+=p;
+      if(t>0.5)o05+=p; if(t>1.5)o15+=p; if(t>2.5)o25+=p;
+      if(t>3.5)o35+=p; if(t>4.5)o45+=p; if(t>5.5)o55+=p;
+    }
+  }
+  const s=hw+dr+aw; hw/=s; dr/=s; aw/=s; // normalise after DC
+  const r=v=>Math.round(v*100);
+  return{lH:lH.toFixed(2),lA:lA.toFixed(2),total:(lH+lA).toFixed(2),
+    source:source||"unknown",  // "xG" (Understat, reliable) or "goals" (API-Football, indicative)
+    hw:r(hw),dr:r(dr),aw:r(aw),btts:r(btts),
+    o05:r(o05),o15:r(o15),o25:r(o25),u25:r(1-o25),
+    o35:r(o35),u35:r(1-o35),o45:r(o45),o55:r(o55),
+    // Only show scorelines with probability ≥ 0.5% to avoid noise (e.g. 9-0 at 0.1%)
+    topScores:scores.sort((a,b)=>b.p-a.p).filter(s=>s.p>=0.005).slice(0,8).map(s=>({sc:`${s.h}-${s.a}`,pct:+(s.p*100).toFixed(1)}))
+  };
+}
+
+function computeCornerPoisson(c1For, c2For){
+  if(!c1For||!c2For||isNaN(+c1For)||isNaN(+c2For))return null;
+  const lam=+c1For + +c2For;
+  if(lam<1)return null;
+  let o75=0,o85=0,o95=0,o105=0,o115=0,o125=0;
+  for(let k=0;k<=30;k++){
+    const p=_pP(k,lam);
+    if(k>7.5)o75+=p; if(k>8.5)o85+=p; if(k>9.5)o95+=p;
+    if(k>10.5)o105+=p; if(k>11.5)o115+=p; if(k>12.5)o125+=p;
+  }
+  const r=v=>Math.round(v*100);
+  return{lam:lam.toFixed(1),o75:r(o75),o85:r(o85),o95:r(o95),o105:r(o105),o115:r(o115),o125:r(o125)};
+}
+
+function buildPoissonBlock(pr,cp,t1,t2){
+  if(!pr)return "";
+  const rows=pr.topScores.map(s=>`${s.sc}(${s.pct}%)`).join(" · ");
+  return `
+=== STATISTICAL PRIOR — DIXON-COLES POISSON MODEL ===
+Source: ${pr.source==="xG"?"Understat real xG averages (high reliability)":"API-Football season goal averages (indicative)"}
+Expected goals:  ${t1} λ=${pr.lH}  |  ${t2} λ=${pr.lA}  |  Total λ=${pr.total}
+
+Win probabilities (model):
+  ${t1}: ${pr.hw}%  |  Draw: ${pr.dr}%  |  ${t2}: ${pr.aw}%
+
+Market probabilities (model-derived):
+  BTTS Yes: ${pr.btts}%  |  No: ${100-pr.btts}%
+  Over 0.5: ${pr.o05}%  |  Over 1.5: ${pr.o15}%
+  Over 2.5: ${pr.o25}%  |  Under 2.5: ${pr.u25}%
+  Over 3.5: ${pr.o35}%  |  Under 3.5: ${pr.u35}%
+  Over 4.5: ${pr.o45}%  |  Over 5.5: ${pr.o55}%
+${cp?`
+Corner markets (Poisson, total λ=${cp.lam}):
+  Over 7.5: ${cp.o75}%  |  Over 8.5: ${cp.o85}%  |  Over 9.5: ${cp.o95}%
+  Over 10.5: ${cp.o105}%  |  Over 11.5: ${cp.o115}%  |  Over 12.5: ${cp.o125}%`:""}
+
+Top 8 scorelines: ${rows}
+
+${pr.source==="xG"?`ANCHOR RULES — HIGH CONFIDENCE (source: real xG data from Understat):
+1. These probabilities derive from actual expected goals, the most reliable football metric.
+2. winProbabilities must stay within 12pp of model values. Deviate further ONLY for a
+   confirmed key injury, strong venue effect, or clear tactical mismatch.
+3. BTTS/Over-Under: start from model values, adjust ≤10pp for team news.
+4. Every deviation >12pp requires explicit justification in chainOfThought.
+5. These are priors — qualitative intelligence refines them, it does not replace them.`:`ANCHOR RULES — ADVISORY (source: season goal averages, not xG):
+1. These probabilities use goal averages which include all competitions, possibly friendlies.
+2. Use them as a directional starting point, NOT as a rigid constraint. Treat 15-20pp
+   deviations as acceptable when qualitative evidence is strong (confirmed lineups, clear
+   form gap, venue, tactical matchup).
+3. These are indicative priors — real intelligence above should carry more weight here.`}
+=== END STATISTICAL PRIOR ===`;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ELITE LAYER 2 — Line Movement Sharp/Square Classification
+// ═══════════════════════════════════════════════════════════
+const _SHARP_BOOKS=['pinnacle','betfair','betfair_ex','matchbook','sporttrade','sbo','sbtech'];
+const _SQUARE_BOOKS=['bet365','williamhill','betway','bwin','unibet','draftkings','fanduel','ladbrokes','coral'];
+
+function classifyMovementSharpness(movement){
+  if(!movement||!movement.length)return null;
+  const tagged=movement.map(m=>{
+    const bk=((m.bookmaker||m.source||m.book||"")+"").toLowerCase();
+    const type=_SHARP_BOOKS.some(b=>bk.includes(b))?"sharp"
+              :_SQUARE_BOOKS.some(b=>bk.includes(b))?"square":"unknown";
+    return{...m,_type:type};
+  });
+  const sharp=tagged.filter(m=>m._type==="sharp");
+  const square=tagged.filter(m=>m._type==="square");
+  const pinnacleMoving=sharp.some(m=>((m.bookmaker||m.source||"")+"").toLowerCase().includes("pinnacle"));
+  if(sharp.length===0&&square.length===0)return null;
+  return{
+    classification:sharp.length>0?"SHARP":"SQUARE",
+    sharpCount:sharp.length,squareCount:square.length,
+    pinnacleMoving,
+    label:sharp.length>0
+      ?`⚡ Sharp money — ${sharp.length} sharp book${sharp.length>1?"s":""} moving${pinnacleMoving?" (Pinnacle included — highest confidence)":""}`
+      :`👥 Public/recreational money — ${square.length} square book${square.length>1?"s":""} moving`
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ELITE LAYER 3 — Closing Line Value (CLV)
+// ═══════════════════════════════════════════════════════════
+// CLV% = (betOdds / closingOdds − 1) × 100
+// Positive = you beat the closing line (genuine edge signal)
+// Negative = market knew more (efficiency gap)
+function calcCLV(betOdds, closingOdds){
+  if(!betOdds||!closingOdds||+closingOdds<=1||+betOdds<=1)return null;
+  return +((+betOdds / +closingOdds - 1)*100).toFixed(1);
+}
+function _clvBadge(clv){
+  if(clv===null||clv===undefined)return"";
+  const col=clv>=5?"#00c896":clv>=0?"#ffb830":"#ff4d6a";
+  return`<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${col}22;color:${col}">${clv>=0?"+":""}${clv}% CLV</span>`;
+}
+function setClosingOdds(id, val){
+  const v=parseFloat(val); if(isNaN(v)||v<=1)return;
+  const hist=getLS(LS.HIST,[]);
+  const idx=hist.findIndex(h=>String(h.id)===String(id)); if(idx<0)return;
+  hist[idx].closingOdds=v;
+  hist[idx].clv=calcCLV(hist[idx].odds, v);
+  setLS(LS.HIST,hist); renderHistoryPage();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ELITE LAYER 4 — Team Stats fetch (for Tier 2/3 Poisson)
+// ═══════════════════════════════════════════════════════════
+async function fetchTeamStats(t1, t2, comp){
+  try{
+    const r=await fetch(`/api/team-stats?team1=${encodeURIComponent(t1)}&team2=${encodeURIComponent(t2)}&comp=${encodeURIComponent(comp)}`);
+    if(!r.ok)return null;
+    return await r.json();
+  }catch{return null;}
+}
+
 function getCalibrationMemo(targetTier, comp){
   // 150-bet threshold per competition, then per tier, then no calibration.
   // Below 150 at every level → pure football analysis (no calibration bias).
@@ -2277,7 +2482,7 @@ RULES — PERMANENT, regardless of sample size:
 `;
 }
 
-function buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,tier,richness,cornerStats){
+function buildAnalysisPrompt(t1,t2,comp,intel,xg1,xg2,refStats,tier,richness,cornerStats,poissonPrior,cornerPoissonPrior,movementClass){
   // NOTE: this now returns only the DYNAMIC, per-match portion of the
   // Phase 2 prompt. The static methodology + JSON schema (PHASE2_STATIC_PROMPT)
   // is sent as a separate, cached content block — see callAI's array-content
@@ -2324,6 +2529,16 @@ ${t2} playing AWAY this match → use their AWAY stats: ${xg2.away_avg_xGF} xGF 
 Combined xG projection: ${(+xg1.home_avg_xGF + +xg2.away_avg_xGF).toFixed(2)} goals expected total
 Regression signals: ${t1} ${xg1.regression} | ${t2} ${xg2.regression}
 === END xG INSIGHT ===`:""}
+
+${buildPoissonBlock(poissonPrior,cornerPoissonPrior,t1,t2)}
+
+${movementClass?`=== LINE MOVEMENT INTELLIGENCE ===
+${movementClass.label}
+Sharp book moves: ${movementClass.sharpCount} | Recreational book moves: ${movementClass.squareCount}
+Pinnacle specifically moving: ${movementClass.pinnacleMoving?"YES — this is the highest-confidence sharp signal. If Pinnacle moved a line, smart money found value there. Weight your own assessment accordingly.":"No — Pinnacle not specifically identified in this movement."}
+NOTE: Sharp money moving FOR the home side is a bullish signal for home win markets.
+Sharp money moving AGAINST the favourite may indicate value on the underdog or draw.
+=== END LINE MOVEMENT ===`:""}
 
 ${getCalibrationMemo(tier, comp)}
 
@@ -2389,6 +2604,42 @@ function renderResults(p,fromCache){
 function buildAllTabs(p,c1,c2){
   // OVERVIEW
   let ov="";
+  // ── Statistical Model (Poisson Prior) ─────────────────────────
+  if(p._poissonPrior){
+    const pr=p._poissonPrior,cp=p._cornerPoissonPrior;
+    const mvs=p.winProbabilities;
+    // Guard: mvs.team1/team2 could be undefined if Phase 2 omitted them
+    const diff1 = (mvs?.team1 != null) ? Math.abs(pr.hw - mvs.team1) : null;
+    const diff2 = (mvs?.team2 != null) ? Math.abs(pr.aw - mvs.team2) : null;
+    const topS=pr.topScores.slice(0,6).map(s=>`<span style="font-size:11px;padding:3px 8px;border-radius:4px;background:var(--card2);color:var(--t2)">${s.sc} <b style="color:var(--text)">${s.pct}%</b></span>`).join(" ");
+    ov+=`<div class="mb16">
+      <div class="sec-ttl"><i class="ti ti-math-function"></i> Statistical Model — Dixon-Coles Poisson <span style="font-size:10px;font-weight:400;color:var(--t3);margin-left:6px">λ home=${pr.lH} | λ away=${pr.lA} | λ total=${pr.total}</span><span style="font-size:9px;padding:1px 6px;border-radius:3px;margin-left:8px;background:${pr.source==="xG"?"rgba(0,200,150,0.12)":"rgba(255,184,48,0.1)"};color:${pr.source==="xG"?"#00c896":"#ffb830"}">${pr.source==="xG"?"xG source":"goal avg source"}</span></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0">
+        <div style="background:var(--card2);border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:18px;font-weight:800;color:var(--gold)">${pr.hw}%</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:2px">HOME WIN (model)</div>
+          ${mvs?.team1!=null?`<div style="font-size:10px;color:var(--t2);margin-top:2px">AI: ${mvs.team1}% <span style="color:${diff1>12?"#ff4d6a":"var(--t3)"}">(Δ${diff1}pp)</span>`:""}
+        </div>
+        <div style="background:var(--card2);border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:18px;font-weight:800;color:var(--t2)">${pr.dr}%</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:2px">DRAW (model)</div>
+          ${mvs?`<div style="font-size:10px;color:var(--t2);margin-top:2px">AI: ${mvs.draw||"?"}%`:""}
+        </div>
+        <div style="background:var(--card2);border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:18px;font-weight:800;color:var(--sap)">${pr.aw}%</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:2px">AWAY WIN (model)</div>
+          ${mvs?.team2!=null?`<div style="font-size:10px;color:var(--t2);margin-top:2px">AI: ${mvs.team2}% <span style="color:${diff2>12?"#ff4d6a":"var(--t3)"}">(Δ${diff2}pp)</span>`:""}
+        </div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0">
+        ${[["BTTS Yes",pr.btts],["Over 2.5",pr.o25],["Under 2.5",pr.u25],["Over 1.5",pr.o15],["Over 3.5",pr.o35],["Over 4.5",pr.o45]].map(([l,v])=>`<span style="font-size:11px;padding:3px 8px;border-radius:4px;background:var(--card2)"><b style="color:var(--text)">${v}%</b> <span style="color:var(--t3)">${l}</span></span>`).join("")}
+        ${cp?[["O/U 9.5",cp.o95],["O/U 10.5",cp.o105]].map(([l,v])=>`<span style="font-size:11px;padding:3px 8px;border-radius:4px;background:var(--card2)"><b style="color:var(--text)">${v}%</b> <span style="color:var(--t3)">Corners ${l}</span></span>`).join(""):""}
+      </div>
+      <div style="margin-top:8px"><div style="font-size:10px;color:var(--t3);margin-bottom:5px">TOP SCORELINES</div><div style="display:flex;flex-wrap:wrap;gap:5px">${topS}</div></div>
+      ${p._movementClass?`<div style="margin-top:10px;padding:8px 10px;background:${p._movementClass.classification==="SHARP"?"rgba(255,184,48,0.08)":"var(--card2)"};border-radius:6px;font-size:12px">
+        <i class="ti ti-${p._movementClass.classification==="SHARP"?"bolt":"users"}" style="margin-right:4px"></i>${p._movementClass.label}</div>`:""}
+    </div>`;
+  }
   if(p.keyFactors?.length){
     ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-list-check"></i> Key factors</div><div class="factors">${(p.keyFactors||[]).map((f,i)=>`<div class="factor"><span class="fnum">${i+1}</span><p>${f}</p></div>`).join("")}</div></div>`;
   }
@@ -2690,8 +2941,12 @@ function buildOddsTab(p,c1,c2){
       const dir=matchMv.move_w1>0.15?"🔴 Sharp money on HOME (line shortened)"
                :matchMv.move_w1<-0.15?"🔵 Money drifting from HOME (line drifted)"
                :"⚪ Normal market movement";
+      const _sharpClass=p._movementClass;
       moveHtml=`<div style="background:rgba(186,117,23,.08);border:1px solid rgba(186,117,23,.25);border-radius:var(--rs);padding:12px 14px;margin-bottom:14px">
-        <div style="font-size:10px;font-weight:700;color:var(--amr);margin-bottom:6px;letter-spacing:.3px">LINE MOVEMENT (opening → current)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:10px;font-weight:700;color:var(--amr);letter-spacing:.3px">LINE MOVEMENT (opening → current)</div>
+          ${_sharpClass?`<div style="font-size:11px;padding:2px 8px;border-radius:4px;background:${_sharpClass.classification==="SHARP"?"rgba(255,184,48,0.12)":"rgba(100,100,100,0.12)"};color:${_sharpClass.classification==="SHARP"?"#ffb830":"var(--t2)"}">${_sharpClass.label}</div>`:""}
+        </div>
         <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px">
           <div><span style="color:var(--t2)">Home win:</span> <strong>${matchMv.open_w1}</strong> → <strong style="color:var(--em)">${matchMv.current_w1}</strong></div>
           ${matchMv.open_w2?`<div><span style="color:var(--t2)">Away win:</span> <strong>${matchMv.open_w2}</strong> → <strong>${matchMv.current_w2}</strong></div>`:""}
@@ -2780,7 +3035,7 @@ function saveToHistory(){
   const p=curPred,mp=p.mainPrediction;
   const hist=getLS(LS.HIST,[]);
   const marketType=mp?.market||"1X2";
-  hist.unshift({id:Date.now()+"",addedAt:new Date().toISOString(),team1:p.team1,team2:p.team2,competition:p.competition,pick:`${marketType}: ${mp?.pick||""}`,market:marketType,odds:mp?.odds,confidence:mp?.confidence,status:"pending"});
+  hist.unshift({id:Date.now()+"",addedAt:new Date().toISOString(),team1:p.team1,team2:p.team2,competition:p.competition,pick:`${marketType}: ${mp?.pick||""}`,market:marketType,odds:mp?.odds,confidence:mp?.confidence,status:"pending",closingOdds:null,clv:null});
   setLS(LS.HIST,hist);
   toast("Prediction saved ✓");
   $("save-btn").disabled=true;$("save-btn").innerHTML=`<i class="ti ti-check"></i> Saved`;
@@ -2966,11 +3221,19 @@ function renderHistoryPage(){
       <div class="hist-foot">
         <span class="h-odds">${h.odds}</span><span class="h-date">${fmtDate(h.addedAt)}</span>
         ${h.confidence?`<span style="font-size:11px;color:var(--t2)">${h.confidence}% conf</span>`:""}
+        ${h.clv!==null&&h.clv!==undefined?_clvBadge(h.clv):""}
         ${h.status==="pending"?`<div class="res-btns">
           <button class="res-btn" onclick="markResult('${h.id}','won')" style="color:var(--em);border-color:rgba(0,200,150,.3)">✓ Won</button>
           <button class="res-btn" onclick="markResult('${h.id}','lost')" style="color:var(--ruby);border-color:rgba(255,77,106,.3)">✗ Lost</button>
           <button class="res-btn" onclick="autoCheckResult('${h.id}')" title="Auto-check result"><i class="ti ti-search"></i></button>
         </div>`:""}
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+        <input type="number" step="0.01" min="1.01" value="${h.closingOdds||""}"
+          placeholder="Closing line odds" title="Enter closing odds to calculate CLV"
+          style="width:130px;font-size:11px;padding:3px 7px;border-radius:5px;border:1px solid var(--border);background:var(--bg2);color:var(--text)"
+          onchange="setClosingOdds('${h.id}',this.value)">
+        <span style="font-size:10px;color:var(--t3)">← set closing odds for CLV</span>
       </div>
     </div>`;
   }).join(""));
@@ -2980,7 +3243,7 @@ function renderHistoryPage(){
 
 function renderAnalytics(hist){
   // Preserve active tab on re-render; only set default if none active yet
-  if(!$("atb-roi").classList.contains("active")&&!$("atb-mkt").classList.contains("active")&&!$("atb-cal").classList.contains("active"))setATab("roi");
+  if(!$("atb-roi").classList.contains("active")&&!$("atb-mkt").classList.contains("active")&&!$("atb-cal").classList.contains("active")&&!$("atb-clv").classList.contains("active"))setATab("roi");
   const settled=hist.filter(h=>h.status!=="pending");
   const won=settled.filter(h=>h.status==="won");
   const totalUnits=settled.length;
@@ -3032,10 +3295,44 @@ function renderAnalytics(hist){
     }).join("")}</tbody>
   </table>
   <p style="font-size:11px;color:var(--t3);margin-top:10px">Calibration shows how accurate the AI's confidence % is vs real win rates. ±10pp = well-calibrated.</p>`);
+
+  // ── CLV TAB ──
+  const clvBets=settled.filter(h=>h.clv!==null&&h.clv!==undefined);
+  if(!clvBets.length){
+    html("atc-clv",`<div class="empty" style="padding:2rem">
+      <i class="ti ti-target-arrow" style="font-size:2rem;color:var(--t3)"></i>
+      <p style="margin-top:8px;color:var(--t2)">No CLV data yet.</p>
+      <p style="font-size:12px;color:var(--t3);margin-top:6px">Enter closing odds on any settled bet in the History tab to track Closing Line Value.</p>
+      <p style="font-size:11px;color:var(--t3);margin-top:12px">CLV = betOdds / closingOdds - 1. Positive = you beat the closing market. Sustained positive CLV is the gold standard for genuine edge.</p>
+    </div>`);
+  }else{
+    const avgCLV=(clvBets.reduce((s,h)=>s+h.clv,0)/clvBets.length).toFixed(1);
+    const posPct=Math.round(clvBets.filter(h=>h.clv>=0).length/clvBets.length*100);
+    const clvMkt={};
+    clvBets.forEach(h=>{const m=h.market||"Other";if(!clvMkt[m])clvMkt[m]={s:0,n:0};clvMkt[m].s+=h.clv;clvMkt[m].n++;});
+    const mktRows=Object.entries(clvMkt).sort((a,b)=>b[1].n-a[1].n)
+      .map(([mkt,{s,n}])=>{const avg=(s/n).toFixed(1);
+        return`<div class="mkt-acc-row"><span class="mkt-acc-name">${mkt}</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:11px;color:var(--t2)">${n} bet${n>1?"s":""}</span>
+          <span style="font-weight:700;color:${+avg>=0?GREEN:RED}">${+avg>=0?"+":""}${avg}%</span>
+        </div></div>`;}).join("");
+    html("atc-clv",`
+      <div class="roi-display" style="margin-bottom:16px">
+        <div class="stat-card"><div class="stat-val" style="color:${+avgCLV>=0?GREEN:RED};font-size:20px">${+avgCLV>=0?"+":""}${avgCLV}%</div><div class="stat-lbl">Avg CLV</div></div>
+        <div class="stat-card"><div class="stat-val" style="font-size:20px;color:${posPct>=55?GREEN:posPct>=45?AMBER:RED}">${posPct}%</div><div class="stat-lbl">% Positive CLV</div></div>
+        <div class="stat-card"><div class="stat-val" style="font-size:20px">${clvBets.length}</div><div class="stat-lbl">CLV Tracked</div></div>
+      </div>
+      <div class="sec-ttl" style="margin-bottom:8px"><i class="ti ti-chart-bar"></i> CLV by market</div>
+      ${mktRows||"<p style=\'color:var(--t3);font-size:12px\'>No market data yet.</p>"}
+      <p style="font-size:11px;color:var(--t3);margin-top:14px;text-align:center">
+        Positive CLV = you beat the closing market. Sustained avg above +3% signals genuine long-run edge.
+      </p>`);
+  }
 }
 
 function setATab(name){
-  ["roi","mkt","cal"].forEach(t=>{$("atb-"+t)?.classList.toggle("active",t===name);$("atc-"+t)?.classList.toggle("hidden",t!==name)});
+  ["roi","mkt","cal","clv"].forEach(t=>{$("atb-"+t)?.classList.toggle("active",t===name);$("atc-"+t)?.classList.toggle("hidden",t!==name)});
 }
 
 function markResult(id,status){

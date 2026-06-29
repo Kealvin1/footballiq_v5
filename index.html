@@ -2117,27 +2117,32 @@ Be specific — real player names, exact scores, real statistics only. Write eff
 }
 
 // ── CALIBRATION MEMO — feeds prediction history back into Phase 2 ──
-function getCalibrationMemo(targetTier){
-  // targetTier: the tier of the match currently being analysed.
-  // Calibration is split by tier so Tier 2 World Cup data (no real xG)
-  // does not dilute Tier 1 calibration (real xG), and vice versa.
+function getCalibrationMemo(targetTier, comp){
+  // 150-bet threshold per competition, then per tier, then no calibration.
+  // Below 150 at every level → pure football analysis (no calibration bias).
+  const THRESHOLD = 150;
   const hist=getLS(LS.HIST,[]);
-  const settled=hist.filter(h=>h.status!=="pending");
-  if(settled.length<5)return "";
+  const settled=hist.filter(h=>h.status==="won"||h.status==="lost");
 
-  // Separate bets by tier using the same getCompTier() logic
-  const tierOf = h => getCompTier(h.competition||"");
+  const normComp = s => (s||"").toLowerCase().trim();
+  const tierOf   = h => getCompTier(h.competition||"");
 
-  // Primary: bets from the SAME tier as current match
-  const sameTier = targetTier ? settled.filter(h=>tierOf(h)===targetTier) : settled;
-  // Secondary: all settled (for overall stats only)
-  const allSettled = settled;
+  const sameComp = settled.filter(h => normComp(h.competition) === normComp(comp||""));
+  const sameTier = targetTier ? settled.filter(h => tierOf(h) === targetTier) : [];
+  const allSettled = settled; // for cross-tier overview only — never primary
 
-  const primary = sameTier.length >= 3 ? sameTier : allSettled;
-  const usingSameTier = sameTier.length >= 3 && targetTier;
-  const tierNote = usingSameTier
-    ? `Filtered to Tier ${targetTier} matches only (${sameTier.length} bets) — keeping calibration relevant to this competition type.`
-    : `Using all ${allSettled.length} settled bets (fewer than 3 in Tier ${targetTier||"?"} yet).`;
+  let primary, scopeLabel;
+  if(sameComp.length >= THRESHOLD){
+    primary    = sameComp;
+    scopeLabel = `${comp} only (${sameComp.length} bets — competition-specific)`;
+  } else if(sameTier.length >= THRESHOLD){
+    primary    = sameTier;
+    scopeLabel = `Tier ${targetTier} broadly (${sameTier.length} bets — fewer than ${THRESHOLD} ${comp} bets yet)`;
+  } else {
+    return ""; // insufficient data — Phase 2 uses pure football analysis
+  }
+
+  const tierNote = `Scope: ${scopeLabel}.`;
 
   const won=primary.filter(h=>h.status==="won");
   const overallWR=Math.round(won.length/primary.length*100);
@@ -2217,58 +2222,57 @@ function getCalibrationMemo(targetTier){
     }
   }
 
-  // Cross-tier overview (always shown for full context)
+  // Cross-tier overview — shown for context only, never used for calibration
   const allWon = allSettled.filter(h=>h.status==="won");
   const crossTierLines = [1,2,3].map(t=>{
     const tb = allSettled.filter(h=>tierOf(h)===t);
     if(!tb.length) return null;
     const tw = tb.filter(h=>h.status==="won").length;
-    return `  · Tier ${t}: ${tw}/${tb.length} won (${Math.round(tw/tb.length*100)}%)`;
+    const needed = Math.max(0, 150 - tb.length);
+    const readyNote = tb.length >= 150 ? "✓ calibration active" : `${needed} more bets needed for calibration`;
+    return `  · Tier ${t}: ${tw}/${tb.length} won (${Math.round(tw/tb.length*100)}%) — ${readyNote}`;
   }).filter(Boolean).join("\n");
 
   return `
 === PERSONAL CALIBRATION DATA ===
-Scope: ${tierNote}
-Overall across all tiers: ${allWon.length}/${allSettled.length} won (${Math.round(allWon.length/allSettled.length*100)}%)
+${tierNote}
+Overall portfolio: ${allWon.length}/${allSettled.length} won (${Math.round(allWon.length/allSettled.length*100)}%) [context only — not used for calibration]
 ${crossTierLines}
 
-This match is Tier ${targetTier||"?"} — detailed calibration below is from Tier ${targetTier||"?"} bets only:
-Win rate (Tier ${targetTier||"?"} only): ${overallWR}% (${won.length} won / ${primary.length} settled)
+Detailed calibration below is from ${scopeLabel}:
+Win rate: ${overallWR}% (${won.length} won / ${primary.length} settled)
 ${brierScore!==null?`Brier Score: ${brierScore} (lower is better; <0.20 is good, <0.15 is excellent, 0.25 = random)`:""}
 
-Market accuracy (Tier ${targetTier||"?"} only):
-${mktLines||"  · Insufficient per-market data yet for this tier"}
+DIRECTIVE CALIBRATION — act on these:
+Confidence bands (${scopeLabel}):
+${bandLines||"  · Insufficient band data yet"}
+${correctionMemo?`Systematic correction: ${correctionMemo}`:""}
 
-Confidence calibration (Tier ${targetTier||"?"} only):
-${bandLines||"  · Insufficient band data yet for this tier"}
-${correctionMemo?`
-Calibration correction: ${correctionMemo}`:""}
+BACKGROUND CONTEXT — do NOT act on this:
+Market win rates (${scopeLabel}) [reference only — see rule 3 below]:
+${mktLines||"  · Insufficient per-market data yet"}
 
-CRITICAL INSTRUCTIONS FOR USING THIS DATA:
+RULES — PERMANENT, regardless of sample size:
 
-1. FOOTBALL STATISTICS ARE PRIMARY. xG, lineups, form, tactical matchup, referee, and
-   competition context are the sole drivers of every pick. Calibration is a secondary
-   sanity check — it must never override what the underlying match data tells you.
+1. FOOTBALL STATISTICS DRIVE EVERY PICK. xG, lineups, form, tactical matchup, referee,
+   and competition context are the sole drivers of pick selection. Always. No exception.
 
-2. CONFIDENCE BANDS ARE THE ONLY DIRECTIVE CALIBRATION. The bands above (50-60%, 60-70%,
-   etc.) directly measure whether your stated probabilities are accurate. If the 70-80%
-   band shows 57% actual win rate, you are systematically overconfident at that level —
-   scale down stated confidence accordingly. This is the calibration signal to act on.
+2. CONFIDENCE BANDS ARE THE ONLY DIRECTIVE CALIBRATION. If the 70-80% band shows 57%
+   actual win rate, scale stated confidence down accordingly. This is the one signal
+   to act on numerically.
 
-3. MARKET ACCURACY IS CONTEXT ONLY — NOT A PICK PREFERENCE RANKING. The per-market win
-   rates reflect past BET SELECTION outcomes, not market quality or AI accuracy. Selection
-   bias is significant: higher win rates on a market often mean it was chosen on obvious
-   cases, not that the market is inherently easier. Do NOT use market win rates to
-   systematically push towards or away from any market type. If a match genuinely calls
-   for Over 2.5 Goals on its football merits, the fact that O/U 2.5 has a low historical
-   win rate here is irrelevant — that history is from different matches.
+3. MARKET WIN RATES ARE PERMANENTLY NON-DIRECTIVE — even at large sample sizes.
+   They reflect past BET SELECTION bias, not market difficulty or AI accuracy. A high
+   BTTS win rate means BTTS was selected on obvious cases — not that BTTS is a better
+   market. Do NOT push towards high-win-rate markets. Do NOT suppress low-win-rate
+   markets. If a match calls for Over 2.5 Goals on its football merits, a low historical
+   O/U 2.5 win rate from different matches is completely irrelevant. This rule is
+   PERMANENT — it does not relax at higher sample counts.
 
-4. TIER ISOLATION. These figures apply ONLY to Tier ${targetTier||"?"}. Do not let
-   results from other tiers bleed into confidence adjustments for this match.
+4. CORRECTION MULTIPLIER adjusts confidence numbers only — never pick selection.
 
-5. SAMPLE SIZE HUMILITY. Markets with fewer than 10 bets have very wide confidence
-   intervals — a 90% win rate on 5 bets is noise, not signal. Treat small-sample market
-   data as weak evidence only.
+5. SCOPE ISOLATION. These figures apply only to ${scopeLabel}. Zero bleed from
+   other competitions or tiers.
 === END CALIBRATION DATA ===
 `;
 }
@@ -2321,7 +2325,7 @@ Combined xG projection: ${(+xg1.home_avg_xGF + +xg2.away_avg_xGF).toFixed(2)} go
 Regression signals: ${t1} ${xg1.regression} | ${t2} ${xg2.regression}
 === END xG INSIGHT ===`:""}
 
-${getCalibrationMemo(tier)}
+${getCalibrationMemo(tier, comp)}
 
 Now apply the methodology and JSON schema from the instructions above to ${t1} vs ${t2}. Remember: every "[Home Team]" placeholder in the schema means ${t1}, every "[Away Team]" placeholder means ${t2}. Fill in real values for this specific match throughout — team1/team2 fields, all picks, all lineups, all stats.`;
 }

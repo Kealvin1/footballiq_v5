@@ -2155,8 +2155,12 @@ function getCalibrationMemo(targetTier){
     .sort((a,b)=>b[1].t-a[1].t)
     .map(([mkt,{w,t}])=>{
       const r=Math.round(w/t*100);
-      const note=r>=62?"STRONG — you can be confident here":r<=42?"WEAK — reduce stated confidence on this market":"reasonable";
-      return`  · ${mkt}: ${w}/${t} bets won (${r}%) — ${note}`;
+      // No STRONG/WEAK labels — market win rate reflects bet selection bias,
+      // not market quality. Only flag genuinely anomalous small-sample results.
+      const sampleNote = t < 10 ? " (small sample — informational only)"
+                       : t < 20 ? " (moderate sample)"
+                       : " (solid sample)";
+      return`  · ${mkt}: ${w}/${t} bets won (${r}%)${sampleNote}`;
     }).join("\n");
 
   // Per confidence-band calibration — from same tier only (primary)
@@ -2240,12 +2244,31 @@ ${bandLines||"  · Insufficient band data yet for this tier"}
 ${correctionMemo?`
 Calibration correction: ${correctionMemo}`:""}
 
-CRITICAL INSTRUCTION: The market accuracy and confidence correction above apply ONLY to
-this competition type (Tier ${targetTier||"?"}). Do NOT let results from other tiers
-influence your confidence adjustments for this match. If a market shows WEAK performance
-in this tier, reduce your stated confidence on that market for this prediction. If it
-shows STRONG performance, you may be bolder. This is real evidence from ${primary.length}
-settled predictions at the same tier, not a generic adjustment.
+CRITICAL INSTRUCTIONS FOR USING THIS DATA:
+
+1. FOOTBALL STATISTICS ARE PRIMARY. xG, lineups, form, tactical matchup, referee, and
+   competition context are the sole drivers of every pick. Calibration is a secondary
+   sanity check — it must never override what the underlying match data tells you.
+
+2. CONFIDENCE BANDS ARE THE ONLY DIRECTIVE CALIBRATION. The bands above (50-60%, 60-70%,
+   etc.) directly measure whether your stated probabilities are accurate. If the 70-80%
+   band shows 57% actual win rate, you are systematically overconfident at that level —
+   scale down stated confidence accordingly. This is the calibration signal to act on.
+
+3. MARKET ACCURACY IS CONTEXT ONLY — NOT A PICK PREFERENCE RANKING. The per-market win
+   rates reflect past BET SELECTION outcomes, not market quality or AI accuracy. Selection
+   bias is significant: higher win rates on a market often mean it was chosen on obvious
+   cases, not that the market is inherently easier. Do NOT use market win rates to
+   systematically push towards or away from any market type. If a match genuinely calls
+   for Over 2.5 Goals on its football merits, the fact that O/U 2.5 has a low historical
+   win rate here is irrelevant — that history is from different matches.
+
+4. TIER ISOLATION. These figures apply ONLY to Tier ${targetTier||"?"}. Do not let
+   results from other tiers bleed into confidence adjustments for this match.
+
+5. SAMPLE SIZE HUMILITY. Markets with fewer than 10 bets have very wide confidence
+   intervals — a 90% win rate on 5 bets is noise, not signal. Treat small-sample market
+   data as weak evidence only.
 === END CALIBRATION DATA ===
 `;
 }

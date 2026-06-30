@@ -2165,7 +2165,7 @@ OVERALL DATA RICHNESS VERDICT (apply the most cautious individual factor):
 MANDATORY OUTPUT FORMAT — write these as the very first THREE lines of your response, exactly in this format:
 LINEUPS: VERIFIED ✓✓ (or CONFIRMED-SINGLE ✓ or PREDICTED ~) — one sentence stating how many sources agreed and why
 DATA: RICH ✓ (or LIMITED ~ or MINIMAL ✗) — one sentence why
-XG: [home_team_name]=X.XX [away_team_name]=X.XX — tournament/season xG averages per game from your research (e.g. XG: Germany=2.25 Paraguay=0.62). Write null for any team where you found no reliable xG figure.
+XG: [home_team_name]=X.XX [away_team_name]=X.XX — PER-GAME average xG only (total ÷ games played), NOT the tournament total. Example: Germany created 7.38 total xG across 3 group games → write XG: Germany=2.46 not Germany=7.38. Netherlands had 5.24 total xG in 3 games → write XG: Netherlands=1.75. Write null for any team where you found no reliable figure.
 
 Then provide your full intelligence report below those three lines.
 
@@ -2524,8 +2524,17 @@ function extractXGFromIntel(intel, t1, t2){
       // Accept only if the key is a substring of the team name (NOT reverse — avoids cross-matches)
       // e.g. key="ger" matches nTeam="germany" ✓  but key="southkorea" never matches nTeam="korearepublic" ✓
       if(key.length >= 3 && nTeam.includes(key)){
-        const num = parseFloat(val);
-        if(!isNaN(num) && num >= 0.15 && num <= 5.0) return num;
+        let num = parseFloat(val);
+        if(isNaN(num)) continue;
+        // Auto-correct tournament totals: if value looks like a 3-game total (>3.5),
+        // divide by 3 to get per-game average. Per-game xG above 3.5 is physically
+        // implausible for a real match; totals across 3 group games commonly reach 4-8.
+        if(num > 3.5 && num <= 15.0){
+          const perGame = +(num / 3).toFixed(2);
+          if(perGame >= 0.15 && perGame <= 3.5) num = perGame;
+          else continue; // still implausible, skip
+        }
+        if(num >= 0.15 && num <= 3.5) return num;
       }
     }
     return null;

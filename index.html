@@ -1920,6 +1920,7 @@ async function doAnalyze(forceRefresh=false){
     p._cornerPoissonPrior = cornerPoissonPrior;
     p._movementClass = movementClass;
     p._dataRichness = dataRichness;
+    p._refStatsFound = !!refStats; // real referee API data from football-data.co.uk
     curPred = p;
 
     _curCacheKey=cacheKey;
@@ -2265,15 +2266,7 @@ function computeAnalysisQualityScore(p){
     bk.push({label:"Statistical model",pts:"+0",note:"No Poisson model — insufficient data"});
   }
 
-  // ⑤ Live market odds (_liveOdds deleted from cache; _hadLiveOdds persists as fallback)
-  if(p._liveOdds||p._hadLiveOdds){
-    score+=7;
-    bk.push({label:"Market odds",pts:"+7",note:"Live odds matched — market pricing informs value assessment"});
-  }else{
-    bk.push({label:"Market odds",pts:"+0",note:"No live odds — value edge cannot be independently verified"});
-  }
-
-  // ⑥ Corner Poisson model
+  // ⑤ Corner Poisson model (was ⑥)
   if(p._cornerPoissonPrior){
     score+=5;
     bk.push({label:"Corner model",pts:"+5",note:"Poisson corner probability model active"});
@@ -2281,12 +2274,28 @@ function computeAnalysisQualityScore(p){
     bk.push({label:"Corner model",pts:"+0",note:"No corner model — corner data unavailable"});
   }
 
-  // ⑦ Line movement intelligence
+  // ⑥ Line movement intelligence
   if(p._movementClass){
     score+=3;
     bk.push({label:"Line movement",pts:"+3",note:`${p._movementClass.classification} money detected — market intelligence available`});
   }else{
     bk.push({label:"Line movement",pts:"+0",note:"No line movement data"});
+  }
+
+  // ⑦ Referee real API data (football-data.co.uk — card rates, penalties, home bias)
+  if(p._refStatsFound){
+    score+=4;
+    bk.push({label:"Referee data",pts:"+4",note:"Real referee stats from API — cards/game, penalty rate, home bias verified"});
+  }else{
+    bk.push({label:"Referee data",pts:"+0",note:"No real referee API data — only available for top European leagues"});
+  }
+
+  // ⑧ Live market odds (The Odds API — validates edge calculations against real prices)
+  if(p._liveOdds||p._hadLiveOdds){
+    score+=3;
+    bk.push({label:"Market odds",pts:"+3",note:"Live odds available — market pricing cross-validates AI edge calculations"});
+  }else{
+    bk.push({label:"Market odds",pts:"+0",note:"No live odds — edge cannot be independently cross-checked"});
   }
 
   return{score:Math.min(score,100),breakdown:bk,tier};
@@ -2331,7 +2340,7 @@ function renderQualityBreakdown(qs){
     ${rows}
     <div style="font-size:10px;color:var(--t3);margin-top:8px;font-style:italic">
       This score measures data quality and verifiability — not prediction confidence.
-      A 100/100 requires Tier 1 competition + verified lineups + Poisson xG + live odds + corners + movement.
+      A 100/100 requires Tier 1 + verified lineups + Poisson xG + corners + movement + referee API + live odds.
     </div>
   </div>`;
 }
@@ -2858,6 +2867,12 @@ function renderResults(p,fromCache){
   const _savedAlready=getLS(LS.HIST,[]).some(h=>h.team1===p.team1&&h.team2===p.team2&&h.competition===p.competition&&h.status==="pending"&&(Date.now()-new Date(h.addedAt).getTime())<3*60*60*1000);
   $("save-btn").disabled=_savedAlready;
   $("save-btn").innerHTML=_savedAlready?`<i class="ti ti-check"></i> Saved`:`<i class="ti ti-bookmark"></i> Save prediction`;
+
+  // Show ODDS tab only when live odds or movement data exists
+  // (avoids permanent empty state "Odds comparison not available")
+  const _hasOddsData=!!(p._liveOdds||p._movement?.length||p._movementClass);
+  const _oddsTabBtn=$("tb-odds");
+  if(_oddsTabBtn)_oddsTabBtn.style.display=_hasOddsData?"":"none";
 
   setTab("overview");
   buildAllTabs(p,c1,c2);

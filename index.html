@@ -1412,17 +1412,25 @@ function detectLineupStatus(intelText){
     if(tag==="confirmed")return"confirmed"; // backward-compat with older single-tier wording
     return"predicted";
   }
-  // Fallback: keyword scan
+  // Fallback 1: keyword scan for explicit multi-source mentions
   const tl=t.toLowerCase();
+  // Count how many known reliable lineup sources are mentioned in the intel
+  const KNOWN_SOURCES=["oddschecker","bulinews","worldsoccertalk","world soccer talk","bbc sport",
+    "sky sports","l\'equipe","marca","as.com","corriere","kicker","goal.com","espn","fotmob",
+    "sofascore","official club","club website","qiumiwu","weibo","sina sports","official announcement"];
+  const srcCount=KNOWN_SOURCES.filter(s=>tl.includes(s)).length;
+  const nameCount=(t.match(/[A-Z][a-zé-]+ [A-Z][a-zé-]+/g)||[]).length;
+  // 2+ known sources mentioned AND real player names found → VERIFIED even if LINEUPS: line said CONFIRMED-SINGLE
+  if(srcCount>=2&&nameCount>=10)return"verified";
   if(tl.includes("verified")&&(tl.includes("2 source")||tl.includes("two source")||tl.includes("multiple source")||tl.includes("both confirm")))return"verified";
   if(tl.includes("confirmed lineup")||tl.includes("official starting")||
      tl.includes("confirmed xi")||tl.includes("confirmed starting xi")||
      tl.includes("official xi")||tl.includes("single source"))return"confirmed";
+  if(srcCount>=1&&nameCount>=8)return"confirmed"; // 1 known source + player names
   if(tl.includes("predicted lineup")||tl.includes("predicted xi")||
      tl.includes("expected lineup")||tl.includes("expected xi"))return"predicted";
   // Final fallback: count real player names found
-  const namePattern=(t.match(/[A-Z][a-zé-]+ [A-Z][a-zé-]+/g)||[]).length;
-  return namePattern>15?"confirmed":"predicted";
+  return nameCount>15?"confirmed":"predicted";
 }
 
 
@@ -2246,6 +2254,9 @@ function computeAnalysisQualityScore(p){
   }else if(pp?.source==="xG-research"){
     score+=8;
     bk.push({label:"Statistical model",pts:"+8",note:"Poisson anchored to tournament xG extracted from Phase 1 research"});
+  }else if(pp?.source==="xG-phase2"){
+    score+=6;
+    bk.push({label:"Statistical model",pts:"+6",note:"Poisson from Phase 2 xG estimate — advisory (no raw Phase 1 xG found)"});
   }else if(pp?.source==="goals"){
     score+=5;
     bk.push({label:"Statistical model",pts:"+5",note:"Poisson anchored to season goal averages (indicative)"});
@@ -2393,7 +2404,7 @@ function buildPoissonBlock(pr,cp,t1,t2){
   const rows=pr.topScores.map(s=>`${s.sc}(${s.pct}%)`).join(" · ");
   return `
 === STATISTICAL PRIOR — DIXON-COLES POISSON MODEL ===
-Source: ${pr.source==="xG"?"Understat real xG averages (high reliability)":pr.source==="xG-research"?"Phase 1 research xG — tournament averages (good reliability)":"API-Football season goal averages (indicative)"}
+Source: ${pr.source==="xG"?"Understat real xG averages (high reliability)":pr.source==="xG-research"?"Phase 1 research xG — tournament averages (good reliability)":pr.source==="xG-phase2"?"Phase 2 xG estimate — derived from match analysis (advisory)":"API-Football season goal averages (indicative)"}
 Expected goals:  ${t1} λ=${pr.lH}  |  ${t2} λ=${pr.lA}  |  Total λ=${pr.total}
 
 Win probabilities (model):
@@ -2426,6 +2437,12 @@ ${pr.source==="xG"?`ANCHOR RULES — HIGH CONFIDENCE (source: real xG data from 
    injuries, clear tactical mismatches, or H2H evidence that contradicts the model.
 3. BTTS/Over-Under: use model as baseline, adjust ≤12pp for team news and context.
 4. These are good priors — intelligence above refines them, it does not replace them.`
+:pr.source==="xG-phase2"?`ANCHOR RULES — ADVISORY (source: Phase 2 xG estimate):
+1. These lambdas are Phase 2's own estimated match xG — treat as structural context only.
+2. Do not be rigidly constrained by these probabilities — they reflect your own prior estimates.
+3. Use this model to check internal consistency: if your winProbabilities differ greatly from
+   these, confirm that the qualitative evidence genuinely justifies the deviation.
+4. These are advisory — your independent football analysis takes clear priority.`
 :`ANCHOR RULES — ADVISORY (source: season goal averages, not xG):
 1. These probabilities use goal averages which include all competitions, possibly friendlies.
 2. Use them as a directional starting point, NOT as a rigid constraint. Treat 15-20pp
@@ -2819,11 +2836,19 @@ function renderResults(p,fromCache){
   if(p.analystNote){
     show("an-note");
     txt("an-txt",p.analystNote);
-    // Compute and render analysis quality score
+    // ── Last-resort Poisson fallback: use Phase 2's own expectedGoals if extraction failed ──
+    // p.expectedGoals is always set by Phase 2 JSON (e.g. team1:1.75, team2:2.0 for NL vs Morocco)
+    if(!p._poissonPrior && p.expectedGoals?.team1 && p.expectedGoals?.team2){
+      const _eH=+p.expectedGoals.team1, _eA=+p.expectedGoals.team2;
+      if(_eH>=0.15&&_eH<=4.0&&_eA>=0.15&&_eA<=4.0){
+        p._poissonPrior=computePoissonPrior(_eH,_eA,"xG-phase2");
+        console.log("[FootballIQ] Poisson fallback from Phase 2 expectedGoals:",_eH,_eA);
+      }
+    }
+    // Compute and render analysis quality score (after Poisson fallback so score includes it)
     const _qs=computeAnalysisQualityScore(p);
     html("an-qs", renderQualityBadge(_qs));
     html("an-qs-breakdown", renderQualityBreakdown(_qs));
-    // Attach score to p so it can be referenced later
     p._qualityScore=_qs.score;
   }else hide("an-note");
   if(p.chainOfThought){show("cot-box");txt("cot-txt",p.chainOfThought)}else hide("cot-box");
@@ -2846,7 +2871,7 @@ function buildAllTabs(p,c1,c2){
     const diff2 = (mvs?.team2 != null) ? Math.abs(pr.aw - mvs.team2) : null;
     const topS=pr.topScores.slice(0,6).map(s=>`<span style="font-size:11px;padding:3px 8px;border-radius:4px;background:var(--card2);color:var(--t2)">${s.sc} <b style="color:var(--text)">${s.pct}%</b></span>`).join(" ");
     ov+=`<div class="mb16">
-      <div class="sec-ttl"><i class="ti ti-math-function"></i> Statistical Model — Dixon-Coles Poisson <span style="font-size:10px;font-weight:400;color:var(--t3);margin-left:6px">λ home=${pr.lH} | λ away=${pr.lA} | λ total=${pr.total}</span><span style="font-size:9px;padding:1px 6px;border-radius:3px;margin-left:8px;background:${pr.source==="xG"?"rgba(0,200,150,0.12)":pr.source==="xG-research"?"rgba(0,200,150,0.08)":"rgba(255,184,48,0.1)"};color:${pr.source==="xG"?"#00c896":pr.source==="xG-research"?"#5ec49e":"#ffb830"}">${pr.source==="xG"?"xG source":pr.source==="xG-research"?"research xG":"goal avg source"}</span></div>
+      <div class="sec-ttl"><i class="ti ti-math-function"></i> Statistical Model — Dixon-Coles Poisson <span style="font-size:10px;font-weight:400;color:var(--t3);margin-left:6px">λ home=${pr.lH} | λ away=${pr.lA} | λ total=${pr.total}</span><span style="font-size:9px;padding:1px 6px;border-radius:3px;margin-left:8px;background:${pr.source==="xG"?"rgba(0,200,150,0.12)":pr.source==="xG-research"?"rgba(0,200,150,0.08)":pr.source==="xG-phase2"?"rgba(100,100,255,0.08)":"rgba(255,184,48,0.1)"};color:${pr.source==="xG"?"#00c896":pr.source==="xG-research"?"#5ec49e":pr.source==="xG-phase2"?"#8888ff":"#ffb830"}">${pr.source==="xG"?"xG source":pr.source==="xG-research"?"research xG":pr.source==="xG-phase2"?"AI xG est.":"goal avg source"}</span></div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0">
         <div style="background:var(--card2);border-radius:8px;padding:10px;text-align:center">
           <div style="font-size:18px;font-weight:800;color:var(--gold)">${pr.hw}%</div>

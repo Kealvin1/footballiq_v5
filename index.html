@@ -1119,8 +1119,8 @@ const txt=(id,v)=>$(id).textContent=v;
 const html=(id,v)=>$(id).innerHTML=v;
 function inits(n){const p=(n||"?").split(/[\s\-\.]+/).filter(Boolean);return p.length===1?p[0].slice(0,3).toUpperCase():p.map(w=>w[0]).join("").slice(0,3).toUpperCase()}
 function cconf(v){return v>=70?"#c9a84c":v>=55?"#ffb830":"#ff4d6a"}
-function confBar(v,c="#1D9E75"){return`<div class="conf-wrap"><div class="conf-track"><div class="conf-fill" style="width:${Math.min(v,100)}%;background:${c}"></div></div><span class="conf-pct">${v}%</span></div>`}
-function confBarNoLabel(v,c="#1D9E75"){return`<div class="conf-wrap"><div class="conf-track"><div class="conf-fill" style="width:${Math.min(v,100)}%;background:${c}"></div></div></div>`}
+function confBar(v,c="var(--em)"){return`<div class="conf-wrap"><div class="conf-track"><div class="conf-fill" style="width:${Math.min(v,100)}%;background:${c}"></div></div><span class="conf-pct">${v}%</span></div>`}
+function confBarNoLabel(v,c="var(--em)"){return`<div class="conf-wrap"><div class="conf-track"><div class="conf-fill" style="width:${Math.min(v,100)}%;background:${c}"></div></div></div>`}
 function fmtDate(iso){return new Date(iso).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}
 
 // ── STORAGE ──
@@ -1567,7 +1567,7 @@ function detectDataRichness(intelText){
     // Squad quality (most players unknown/minor leagues)
     "majority of players","most players unknown","largely obscure","unknown outside",
     "minor league","lower league players","not recognised internationally",
-    "no internationally recognised","squad lacks","world cup debut","tournament debut",
+    "no internationally recognised","squad lacks","tournament debut",
     "making their debut","international debut","first world cup","first ever world cup",
     // Referee
     "referee unknown","no referee data","no referee information","referee not found",
@@ -1742,7 +1742,9 @@ async function doAnalyze(forceRefresh=false){
     startLoading(t1,t2,comp);
     $("phase-fill").style.width="100%";
     $("phase-fill").style.background="var(--em)";
-    setTimeout(()=>{hide("loading-section");renderResults({...cached,_fromCache:true},true)},400);
+    const _cachedPred={...cached,_fromCache:true};
+    curPred=_cachedPred; // CRITICAL: set curPred so Save/Acca/Share work on cached results
+    setTimeout(()=>{hide("loading-section");renderResults(_cachedPred,true)},400);
     return;
   }
   if(forceRefresh) cacheSet(cacheKey,null); // clear stale cache
@@ -1922,8 +1924,9 @@ async function doAnalyze(forceRefresh=false){
 
     _curCacheKey=cacheKey;
     const toCache={...p};
-    delete toCache._liveOdds;
-    delete toCache._movement;
+    toCache._hadLiveOdds=!!liveOdds; // preserve flag so quality score is stable in cache
+    delete toCache._liveOdds;  // live odds expire quickly — not worth caching
+    delete toCache._movement;  // raw movement array expires quickly
     toCache._cachedAt=Date.now();
     cacheSet(cacheKey, toCache);
 
@@ -1949,8 +1952,6 @@ async function doAnalyze(forceRefresh=false){
 }
 
 // ── LOADING HELPERS ─────────────────────────────────────────────────
-let stepTmr2=null;
-
 function setPhase(phase){
   const fill=$("phase-fill");
   const label=$("phase-label");
@@ -2264,8 +2265,8 @@ function computeAnalysisQualityScore(p){
     bk.push({label:"Statistical model",pts:"+0",note:"No Poisson model — insufficient data"});
   }
 
-  // ⑤ Live market odds
-  if(p._liveOdds){
+  // ⑤ Live market odds (_liveOdds deleted from cache; _hadLiveOdds persists as fallback)
+  if(p._liveOdds||p._hadLiveOdds){
     score+=7;
     bk.push({label:"Market odds",pts:"+7",note:"Live odds matched — market pricing informs value assessment"});
   }else{
@@ -2853,7 +2854,10 @@ function renderResults(p,fromCache){
   }else hide("an-note");
   if(p.chainOfThought){show("cot-box");txt("cot-txt",p.chainOfThought)}else hide("cot-box");
   txt("r-disc",p.disclaimer?`⚠ ${p.disclaimer}`:"");
-  $("save-btn").disabled=false;$("save-btn").innerHTML=`<i class="ti ti-bookmark"></i> Save prediction`;
+  // Only enable Save if this exact match hasn't already been saved this session
+  const _savedAlready=getLS(LS.HIST,[]).some(h=>h.team1===p.team1&&h.team2===p.team2&&h.competition===p.competition&&h.status==="pending"&&(Date.now()-new Date(h.addedAt).getTime())<3*60*60*1000);
+  $("save-btn").disabled=_savedAlready;
+  $("save-btn").innerHTML=_savedAlready?`<i class="ti ti-check"></i> Saved`:`<i class="ti ti-bookmark"></i> Save prediction`;
 
   setTab("overview");
   buildAllTabs(p,c1,c2);
@@ -2881,7 +2885,7 @@ function buildAllTabs(p,c1,c2){
         <div style="background:var(--card2);border-radius:8px;padding:10px;text-align:center">
           <div style="font-size:18px;font-weight:800;color:var(--t2)">${pr.dr}%</div>
           <div style="font-size:10px;color:var(--t3);margin-top:2px">DRAW (model)</div>
-          ${mvs?`<div style="font-size:10px;color:var(--t2);margin-top:2px">AI: ${mvs.draw||"?"}%`:""}
+          ${mvs?`<div style="font-size:10px;color:var(--t2);margin-top:2px">AI: ${mvs.draw||"?"}%</div>`:""}
         </div>
         <div style="background:var(--card2);border-radius:8px;padding:10px;text-align:center">
           <div style="font-size:18px;font-weight:800;color:var(--sap)">${pr.aw}%</div>
@@ -3668,7 +3672,8 @@ function checkIfWon(pick,result,t1,t2){
   if(/:\s*w2$/.test(p)||p.endsWith(" w2")||p.includes("1x2: w2")){return w.includes(t2.toLowerCase())}
   if(p.includes(t2.toLowerCase()+" win")){return w.includes(t2.toLowerCase())}
   // Draw (must be exactly "draw" or end with ": x" — not "1x" double chance)
-  if(p.endsWith(": draw")||p.endsWith(": x")||p==="draw"){
+  // Also handle "Draw (X)", "Draw(X)", "1X2: Draw" formats
+  if(p.endsWith(": draw")||p.endsWith(": x")||p==="draw"||/:\s*draw(\s*\(x\))?$/i.test(p)){
     const parts=sc.split("-");return parts.length===2&&parts[0].trim()===parts[1].trim();
   }
   // Cannot auto-determine BTTS, O/U, AH, Corners, Cards etc.

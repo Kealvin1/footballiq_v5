@@ -1203,7 +1203,7 @@ let toastTmr;
 function toast(msg,ms=2400){const t=$("toast");t.textContent=msg;t.classList.remove("hidden");clearTimeout(toastTmr);toastTmr=setTimeout(()=>t.classList.add("hidden"),ms)}
 
 // ── API ──
-async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="claude-sonnet-4-6",temperature=0){
+async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="claude-sonnet-5",temperature=0){
   const key=getApiKey();
   if(!key){toast("⚠ Add API key in Settings ⚙");throw new Error("No API key configured.")}
   // temperature defaults to 0 (fully deterministic) — appropriate for
@@ -1216,7 +1216,11 @@ async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="c
   // bit-identical (distributed inference has residual floating-point
   // variation), and genuine differences from fresh search results or moved
   // odds still flow through normally regardless of this setting.
-  const body={model,max_tokens:tokens,temperature,messages:[{role:"user",content:prompt}]};
+  const body={model,max_tokens:tokens,messages:[{role:"user",content:prompt}]};
+  // Sonnet 5 returns a 400 error if temperature/top_p/top_k are set to any non-default
+  // value. Sonnet 4.6 and Haiku 4.5 still accept temperature normally, so only omit it
+  // for Sonnet 5 specifically — every other model keeps its existing behaviour untouched.
+  if(!model.includes("sonnet-5"))body.temperature=temperature;
   if(useSearch)body.tools=[{type:"web_search_20250305",name:"web_search"}];
   if(systemPrompt)body.system=systemPrompt;
   const controller=new AbortController();
@@ -1247,6 +1251,11 @@ async function callAI(prompt,tokens=3500,useSearch=true,systemPrompt="",model="c
   }
   const d=await res.json();
   if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));
+  // Sonnet 5 cybersecurity safeguards can refuse a request — this arrives as a
+  // successful HTTP 200 with stop_reason:"refusal", NOT an error or exception.
+  // Without this check the refusal text would silently flow into parseJSON()
+  // and fail with a confusing "malformed JSON" error instead of a clear message.
+  if(d.stop_reason==="refusal")throw new Error("__REFUSED__");
   // Detect token truncation — incomplete JSON would fail to parse
   if(d.stop_reason==="max_tokens")throw new Error("__TRUNCATED__");
   return d.content.filter(b=>b.type==="text").map(b=>b.text).join("\n");
@@ -1871,7 +1880,7 @@ async function doAnalyze(forceRefresh=false){
     const _staticBlock={type:"text",text:PHASE2_STATIC_PROMPT,cache_control:{type:"ephemeral"}};
     let rawAnalysis;
     try{
-      rawAnalysis = await callAI([_staticBlock,{type:"text",text:analysisPrompt}], 16000, false, ANALYST_SYSTEM, "claude-sonnet-4-6", 0.2);
+      rawAnalysis = await callAI([_staticBlock,{type:"text",text:analysisPrompt}], 16000, false, ANALYST_SYSTEM, "claude-sonnet-5", 0.2);
     }catch(e){
       if(e.message==="__TRUNCATED__"){
         // Response was cut off — retry asking for more compact output
@@ -1880,7 +1889,12 @@ async function doAnalyze(forceRefresh=false){
           "\n\nCRITICAL: Previous attempt was too long and got cut off. "+
           "Be extremely concise. Limit reasoning fields to 8 words max. "+
           "Skip oddsComparison array entirely (use []). The intelligence object MUST still be fully populated — do not null it. Output valid complete JSON under 6000 tokens.";
-        rawAnalysis = await callAI([_staticBlock,{type:"text",text:retryDynamic}], 16000, false, ANALYST_SYSTEM, "claude-sonnet-4-6", 0.2);
+        rawAnalysis = await callAI([_staticBlock,{type:"text",text:retryDynamic}], 16000, false, ANALYST_SYSTEM, "claude-sonnet-5", 0.2);
+      } else if(e.message==="__REFUSED__"){
+        // Sonnet 5's cybersecurity safeguards can occasionally flag legitimate football
+        // content (rare false positive). Give the user a clear, actionable message
+        // instead of a confusing JSON parse error.
+        throw new Error("Analysis was declined by the model's safety system. This is usually a rare false positive — please try refreshing the analysis.");
       } else { throw e; }
     }
 
@@ -3384,6 +3398,7 @@ List at most the 15 most relevant real fixtures found, ordered by date — but i
   }catch(e){
     const msg = e.message==="__TRUNCATED__" ? "Too many fixtures to list — try narrowing to a specific competition or shorter time range."
       : e.message==="__MALFORMED__" ? "Could not read fixture data. Please try again."
+      : e.message==="__REFUSED__" ? "Fixture search was declined by the model's safety system — please try again."
       : e.message==="No API key configured." ? "Add your Anthropic API key in ⚙ Settings first."
       : e.message || "Failed to load fixtures. Please try again.";
     html("fix-results",`<div class="err-box"><p><i class="ti ti-alert-circle"></i> ${msg}</p></div>`);
@@ -3446,7 +3461,7 @@ Combined odds: ${combo}
 Return ONLY valid JSON:
 {"combinedOdds":${combo},"combinedConfidence":35,"riskLevel":"High","weakestLeg":"Leg N — reason","strongestLeg":"Leg N — reason","legAnalysis":[${acca.map((l,i)=>`{"leg":${i+1},"match":"${esc(l.team1)} vs ${esc(l.team2)}","pick":"${esc(l.pick)}","risk":"Medium","note":"analysis"}`).join(",")}],"recommendation":"sentence","alternativeSuggestion":"optional"}`,1200,false);
     const d=parseJSON(raw);renderAccaAnalysis(d);show("acca-analysis");calcReturns();
-  }catch(e){toast("Acca analysis failed: "+e.message)}
+  }catch(e){const _m=e.message==="__REFUSED__"?"declined by the model's safety system — try again":e.message;toast("Acca analysis failed: "+_m)}
   finally{$("acca-analyze-btn").disabled=false;$("acca-analyze-btn").innerHTML=`<i class="ti ti-brain"></i> Analyze accumulator`}
 }
 
@@ -3683,7 +3698,7 @@ If not found: {"found":false}`,400,true);
     const i=hist.findIndex(h=>h.id===id);
     if(i>=0){hist[i].status=won?"won":"lost";hist[i].result=d.score;hist[i].settledBy="ai-search";setLS(LS.HIST,hist)}
     renderHistoryPage();toast(`Result found: ${d.score} — Marked as ${won?"Won ✓":"Lost ✗"} (via AI search)`);
-  }catch(e){toast("Auto-check failed: "+e.message)}
+  }catch(e){const _m=e.message==="__REFUSED__"?"declined by the model's safety system — try again":e.message;toast("Auto-check failed: "+_m)}
 }
 
 function checkIfWon(pick,result,t1,t2){

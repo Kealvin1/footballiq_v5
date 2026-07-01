@@ -1470,7 +1470,24 @@ function tierBorder(tier){
 function quickSaveMarket(arrName,idx){
   if(!curPred)return;
   const p=curPred;
-  const arr=p[arrName]||[];
+  // CRITICAL: idx refers to the position in the FILTERED/SORTED array the user
+  // actually sees on screen — not the raw p[arrName] array. Correct Scores and
+  // Goalscorers are sorted by probability descending before rendering, and
+  // Markets/Additional Markets are filtered for null entries before rendering.
+  // Looking up p[arrName][idx] directly would silently save the WRONG bet
+  // whenever sort/filter changes the order — which for sorted tabs is nearly
+  // every time. Rebuild the exact same transform used at render time so idx
+  // always resolves to what the user actually clicked.
+  let arr;
+  if(arrName==="correctScorePredictions"){
+    arr=[...(p.correctScorePredictions||[])].filter(s=>s&&s.score).sort((a,b)=>b.probability-a.probability);
+  }else if(arrName==="goalscorers"){
+    arr=[...(p.goalscorers||[])].filter(Boolean).sort((a,b)=>b.probability-a.probability);
+  }else if(arrName==="predictions"||arrName==="additionalMarkets"){
+    arr=(p[arrName]||[]).filter(Boolean);
+  }else{
+    arr=p[arrName]||[];
+  }
   const m=arr[idx];
   if(!m)return;
   // Different array types use different field names — normalize so every
@@ -2649,8 +2666,15 @@ function getCalibrationMemo(targetTier, comp){
     }).join("\n");
 
   // Per confidence-band calibration — from same tier only (primary)
+  // CRITICAL: exclude 1xBet-imported bets from confidence calibration. Those entries
+  // carry a synthetic confidence estimated from odds (impliedProb+8%), not a genuine
+  // AI-stated prediction — feeding fabricated numbers into calibration would corrupt
+  // the exact signal this system is designed to measure. Market win-rate stats above
+  // still include them (that's genuine bet-outcome data), only confidence-based
+  // calibration below excludes them.
+  const _genuineConf = h => h._confidenceSource!=="estimated-from-odds";
   const bands={"50-60%":{p:0,w:0},"60-70%":{p:0,w:0},"70-80%":{p:0,w:0},"80%+":{p:0,w:0}};
-  primary.forEach(h=>{
+  primary.filter(_genuineConf).forEach(h=>{
     const conf=h.confidence||0;
     const b=conf>=80?"80%+":conf>=70?"70-80%":conf>=60?"60-70%":conf>=50?"50-60%":null;
     if(b){bands[b].p++;if(h.status==="won")bands[b].w++}
@@ -2672,7 +2696,7 @@ function getCalibrationMemo(targetTier, comp){
   // BS = (1/N) * Σ(probability - outcome)². Range 0 (perfect) to 1 (worst).
   // For reference: random guessing = 0.25, good calibration ≈ 0.15-0.20.
   // Brier score — from same tier only (primary)
-  const brierItems = primary.filter(h => h.confidence != null);
+  const brierItems = primary.filter(h => h.confidence != null && _genuineConf(h));
   let brierScore = null;
   if(brierItems.length >= 5){
     const sumSq = brierItems.reduce((s, h) => {
@@ -2687,7 +2711,7 @@ function getCalibrationMemo(targetTier, comp){
   // confidence (says 70%, wins 55%), derive a correction factor to apply.
   let correctionMemo = "";
   // Correction multiplier — from same tier only (primary)
-  const confsettled = primary.filter(h => h.confidence != null && h.confidence >= 50);
+  const confsettled = primary.filter(h => h.confidence != null && h.confidence >= 50 && _genuineConf(h));
   if(confsettled.length >= 10){
     const avgStated  = confsettled.reduce((s,h) => s + (h.confidence||0), 0) / confsettled.length / 100;
     const avgActual  = confsettled.filter(h => h.status === "won").length / confsettled.length;
@@ -2856,9 +2880,11 @@ function renderResults(p,fromCache){
   const wpSum=(wp.team1||0)+(wp.draw||0)+(wp.team2||0)||100;
   const wp1=((wp.team1||0)/wpSum*100).toFixed(1),wpD=((wp.draw||0)/wpSum*100).toFixed(1),wp2=((wp.team2||0)/wpSum*100).toFixed(1);
   html("prob-bar",`<div style="width:${wp1}%;background:linear-gradient(90deg,#9a7d35,#c9a84c);border-radius:7px 0 0 7px;transition:width .8s"></div><div style="width:${wpD}%;background:rgba(96,96,128,0.7);transition:width .8s"></div><div style="width:${wp2}%;background:linear-gradient(90deg,#2d6bb5,#4d9fff);border-radius:0 7px 7px 0;transition:width .8s"></div>`);
-  // Update prob legend to show normalised values
-  wp.team1=+wp1;wp.draw=+wpD;wp.team2=+wp2;
-  html("prob-leg",`<span style="color:var(--gold);font-weight:700">${p.team1} ${wp.team1}%</span><span style="color:var(--t2);font-weight:600">Draw ${wp.draw}%</span><span style="color:var(--sap);font-weight:700">${p.team2} ${wp.team2}%</span>`);
+  // Show normalised values in the legend WITHOUT mutating p.winProbabilities —
+  // p is the cached/curPred object; writing back into it caused repeated
+  // toFixed(1) rounding to compound on every re-render of the same cached
+  // result, introducing tiny cumulative float drift over time.
+  html("prob-leg",`<span style="color:var(--gold);font-weight:700">${p.team1} ${wp1}%</span><span style="color:var(--t2);font-weight:600">Draw ${wpD}%</span><span style="color:var(--sap);font-weight:700">${p.team2} ${wp2}%</span>`);
 
   {const mp=p.mainPrediction||{market:'1X2',pick:'—',odds:'—',confidence:0,value:false};
     html("top-pred",`<div><div class="tp-lbl">TOP PREDICTION</div><div class="tp-pick">${mp.market}: ${mp.pick}</div></div><div><div class="tp-odds">${mp.odds}</div><div class="tp-conf">${mp.confidence}% confidence${mp.value?`<span class="vtag">value</span>`:""}</div></div>`);
@@ -3258,12 +3284,12 @@ function buildOddsTab(p,c1,c2){
     }
   }
 
-  // Prepend movement to odds tab
-  if(moveHtml){
-    const existing=document.getElementById("tc-odds").innerHTML;
-    html("tc-odds",moveHtml+existing);
-  }
-
+  // NOTE: moveHtml is NOT written to the DOM here. It's carried through the
+  // function and prepended to the final `h` output below, right before the
+  // single html("tc-odds",h) call. Writing it directly to the DOM at this
+  // point (the previous approach) was a bug — that write got silently
+  // overwritten by the final html("tc-odds",h) call further down, meaning
+  // the line movement / sharp-money banner never actually stayed visible.
   let liveHtml="";
 
   if(lo){
@@ -3273,10 +3299,19 @@ function buildOddsTab(p,c1,c2){
       const h2h=bookies.map(b=>{const m=b.markets?.find(x=>x.key==="h2h");return{n:b.title,m}}).filter(x=>x.m);
       const totals=bookies.map(b=>{const m=b.markets?.find(x=>x.key==="totals");return{n:b.title,m}}).filter(x=>x.m);
       const bttsMkts=bookies.map(b=>{const m=b.markets?.find(x=>x.key==="btts");return{n:b.title,m}}).filter(x=>x.m);
+      // The Odds API can return the fixture with home/away flipped relative to how the
+      // user entered team1/team2 (matchToTeam matches either orientation). Looking up
+      // outcomes by lo.home_team assumed p.team1 was always home — wrong for reversed
+      // matches, silently swapping team1/team2's odds. Resolve the actual name to query
+      // for each side by fuzzy-matching p.team1 against lo.home_team vs lo.away_team.
+      const _nrm=s=>(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+      const _t1IsHome=_nrm(lo.home_team).includes(_nrm(p.team1))||_nrm(p.team1).includes(_nrm(lo.home_team));
+      const team1OddsName=_t1IsHome?lo.home_team:lo.away_team;
+      const team2OddsName=_t1IsHome?lo.away_team:lo.home_team;
       const liveMarkets=[
-        {label:`${p.team1} Win`,getter:b=>b.m.outcomes?.find(o=>o.name===lo.home_team)?.price,src:h2h},
+        {label:`${p.team1} Win`,getter:b=>b.m.outcomes?.find(o=>o.name===team1OddsName)?.price,src:h2h},
         {label:"Draw",getter:b=>b.m.outcomes?.find(o=>o.name==="Draw")?.price,src:h2h},
-        {label:`${p.team2} Win`,getter:b=>b.m.outcomes?.find(o=>o.name===lo.away_team)?.price,src:h2h},
+        {label:`${p.team2} Win`,getter:b=>b.m.outcomes?.find(o=>o.name===team2OddsName)?.price,src:h2h},
         {label:"Over 2.5 Goals",getter:b=>b.m.outcomes?.find(o=>o.name==="Over"&&o.point===2.5)?.price,src:totals},
         {label:"Under 2.5 Goals",getter:b=>b.m.outcomes?.find(o=>o.name==="Under"&&o.point===2.5)?.price,src:totals},
         {label:"BTTS Yes",getter:b=>b.m.outcomes?.find(o=>o.name==="Yes")?.price,src:bttsMkts},
@@ -3292,14 +3327,19 @@ function buildOddsTab(p,c1,c2){
   }
 
   const oc=p.oddsComparison;
-  if(!oc?.length&&!liveHtml){html("tc-odds",`<div class="empty"><i class="ti ti-refresh-alert"></i><p>Odds comparison not available.</p></div>`);return}
+  if(!oc?.length&&!liveHtml){
+    // Still show moveHtml even when there's no bookmaker odds to display —
+    // line movement direction is useful information on its own.
+    html("tc-odds",moveHtml+`<div class="empty"><i class="ti ti-refresh-alert"></i><p>Odds comparison not available.</p></div>`);
+    return;
+  }
 
   const mkts=[
     {k:"w1",lbl:`${p.team1} Win`},{k:"draw",lbl:"Draw"},{k:"w2",lbl:`${p.team2} Win`},
     {k:"over25",lbl:"Over 2.5"},{k:"under25",lbl:"Under 2.5"},
     {k:"bttsY",lbl:"BTTS Yes"},{k:"bttsN",lbl:"BTTS No"}
   ];
-  let h=liveHtml;
+  let h=moveHtml+liveHtml; // moveHtml now correctly flows into the final render
   if(oc?.length){
     if(liveHtml)h+=`<div class="divider" style="margin:16px 0"></div><div style="font-size:11px;font-weight:600;color:var(--t2);margin-bottom:12px;letter-spacing:.3px">AI-ESTIMATED ODDS</div>`;
     for(const m of mkts){
@@ -3578,9 +3618,10 @@ function renderAnalytics(hist){
       </div>`;
     }).join("")}</div>`:`<div class="empty" style="padding:1rem"><p>No settled bets to show market accuracy.</p></div>`);
 
-  // Calibration
+  // Calibration — exclude 1xBet-imported bets (synthetic confidence from odds,
+  // not a genuine AI-stated prediction) so this table reflects real calibration only.
   const bands={"50-60%":{pred:0,won:0},"60-70%":{pred:0,won:0},"70-80%":{pred:0,won:0},"80%+":{pred:0,won:0}};
-  settled.forEach(h=>{
+  settled.filter(h=>h._confidenceSource!=="estimated-from-odds").forEach(h=>{
     const c=h.confidence||0;
     let b=c>=80?"80%+":c>=70?"70-80%":c>=60?"60-70%":c>=50?"50-60%":null;
     if(b){bands[b].pred++;if(h.status==="won")bands[b].won++}
@@ -3931,8 +3972,25 @@ let swReg = null;
 
 // Alert shortlist stored in localStorage
 const LS_ALERT = "fiq-alert-shortlist";
-function getAlertShortlist(){ return getLS(LS_ALERT, []); }
+function getAlertShortlist(){
+  const sl = getLS(LS_ALERT, []);
+  // Auto-prune alerts whose kickoff was more than 4 hours ago (full match + stoppage +
+  // extra time is well under 4h; anything older is definitely finished and stale).
+  // Without this, the shortlist grows forever and stale matches get polled indefinitely.
+  const now = Date.now();
+  const pruned = sl.filter(a => {
+    const kt = new Date(a.kickoff).getTime();
+    return isNaN(kt) || (now - kt) < 4*60*60*1000;
+  });
+  if(pruned.length !== sl.length) setAlertShortlist(pruned); // persist the cleanup
+  return pruned;
+}
 function setAlertShortlist(v){ localStorage.setItem(LS_ALERT, JSON.stringify(v)); }
+function removeFromAlerts(team1, team2){
+  const sl = getAlertShortlist().filter(a => !(a.team1===team1 && a.team2===team2));
+  setAlertShortlist(sl);
+  toast("Removed from alerts");
+}
 
 function addToAlerts(){
   if(!curPred){toast("Run an analysis first");return}

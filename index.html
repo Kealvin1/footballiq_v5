@@ -942,6 +942,21 @@ select option{background:var(--card2)}
       <label class="flabel">Currency</label>
       <select id="cur-input"><option value="€">€ EUR</option><option value="$">$ USD</option><option value="£">£ GBP</option><option value="MAD">MAD</option></select>
     </div>
+    <div class="mb12" style="background:var(--card2);border-radius:var(--rs);padding:11px 13px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:12px;font-weight:700"><i class="ti ti-currency-euro" style="color:var(--em)"></i> Exchange rates (→ EUR)</div>
+        <button class="btn-sm" style="font-size:10px;padding:4px 9px" onclick="refreshRatesNow()"><i class="ti ti-refresh"></i> Refresh now</button>
+      </div>
+      <div style="font-size:11px;color:var(--t2);margin-bottom:6px">Fetched automatically once a day from <a href="https://frankfurter.dev" target="_blank" style="color:var(--em)">Frankfurter</a> (free, no API key, ECB + central bank sources) — refreshed right before every 1xBet import. All imported bet history is converted to EUR at import time using the rate active then, so P&L stays consistent even across currency switches. You can also override any rate manually below.</div>
+      <div id="rates-fetch-status" style="font-size:10px;color:var(--t3);margin-bottom:8px"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><label style="font-size:10px;color:var(--t3)">1 MAD =</label><input type="number" step="0.001" id="rate-mad" placeholder="0.093" style="font-size:13px;padding:7px 10px"></div>
+        <div><label style="font-size:10px;color:var(--t3)">1 USD =</label><input type="number" step="0.001" id="rate-usd" placeholder="0.92" style="font-size:13px;padding:7px 10px"></div>
+        <div><label style="font-size:10px;color:var(--t3)">1 GBP =</label><input type="number" step="0.001" id="rate-gbp" placeholder="1.17" style="font-size:13px;padding:7px 10px"></div>
+        <div><label style="font-size:10px;color:var(--t3)">1 XOF/XAF =</label><input type="number" step="0.0001" id="rate-xof" placeholder="0.00152" style="font-size:13px;padding:7px 10px"></div>
+      </div>
+      <div style="font-size:10px;color:var(--t3);margin-top:6px">XOF (West Africa) and XAF (Central Africa) share a fixed peg to EUR (1 EUR = 655.957 CFA) — this rate never floats, so it rarely needs updating.</div>
+    </div>
     <div class="modal-foot">
       <button class="btn-ghost" onclick="closeSettings()">Cancel</button>
       <button class="btn" style="max-width:100px" onclick="saveSettings()"><i class="ti ti-check"></i> Save</button>
@@ -1182,18 +1197,125 @@ function showPage(p){
 }
 
 // ── SETTINGS ──
+// Default exchange rates to EUR — used only if the live API is unreachable
+// (offline, rate-limited, or the currency isn't covered). These are static
+// fallback values that will drift out of date; the live fetch below is the
+// primary source whenever it succeeds.
+// XOF and XAF are both CFA Francs pegged to EUR at a FIXED, treaty-defined rate
+// (1 EUR = 655.957 CFA) that never floats — unlike MAD/USD/GBP this rate is
+// exact and permanent, so the static fallback is just as reliable as a live fetch.
+const DEFAULT_RATES_TO_EUR = { MAD: 0.093, USD: 0.92, GBP: 1.17, EUR: 1, XOF: 1/655.957, XAF: 1/655.957 };
+const LS_RATES_CACHE = "fiq_rates_cache"; // { rates:{MAD:0.093,...}, fetchedAt: ISOString }
+const RATES_CACHE_TTL = 24*60*60*1000; // refetch once per day — rates don't move enough intra-day to matter for this use case
+
+function getExchangeRates(){
+  const s=getSettings();
+  const cache=getLS(LS_RATES_CACHE,null);
+  // Priority: live-fetched cache (if fresh) > manual Settings override > static default
+  const base = (cache?.rates) ? {...DEFAULT_RATES_TO_EUR, ...cache.rates} : DEFAULT_RATES_TO_EUR;
+  return { ...base, ...(s.rates||{}) }; // manual Settings values always win if the person explicitly set them
+}
+
+// Fetch live rates from Frankfurter (api.frankfurter.dev) — free, no API key,
+// ECB + 84 central bank sources, covers 200+ currencies including MAD.
+// Runs automatically once per day; silently falls back to cached/static
+// rates on any failure (offline, currency not covered, API down) so this
+// NEVER blocks or breaks an import — it's a pure enhancement over the
+// static defaults, never a hard dependency.
+async function fetchLiveExchangeRates(){
+  try{
+    const cache=getLS(LS_RATES_CACHE,null);
+    if(cache?.fetchedAt && (Date.now()-new Date(cache.fetchedAt).getTime())<RATES_CACHE_TTL){
+      // Merge with defaults even on the cache-hit path — a past fetch may have
+      // partially failed (e.g. only MAD succeeded that day), leaving the cached
+      // object incomplete. Without this merge, any caller reading the return
+      // value directly (not through getExchangeRates()) would get undefined
+      // for whichever currencies failed on the day this was cached.
+      return {...DEFAULT_RATES_TO_EUR, ...cache.rates};
+    }
+    // XOF/XAF deliberately excluded — they're fixed by treaty at exactly
+    // 1 EUR = 655.957 CFA and never float, so the static default in
+    // DEFAULT_RATES_TO_EUR is already exact. Live-fetching them daily would
+    // waste 2 of 5 API calls for zero benefit and risk a "live" value that's
+    // marginally LESS precise than the exact mathematical constant.
+    const CURRENCIES=["MAD","USD","GBP"]; // extend this list only with currencies that actually float
+    const results={};
+    for(const cur of CURRENCIES){
+      try{
+        const r=await fetch(`https://api.frankfurter.dev/v2/rate/${cur}/EUR`);
+        if(!r.ok)continue;
+        const d=await r.json();
+        // Response shape: {"date":"...","base":"MAD","quote":"EUR","rate":0.0933}
+        if(d?.rate)results[cur]=d.rate;
+      }catch{} // one currency failing shouldn't block the others
+    }
+    if(Object.keys(results).length){
+      setLS(LS_RATES_CACHE,{rates:results,fetchedAt:new Date().toISOString()});
+      return {...DEFAULT_RATES_TO_EUR, ...results};
+    }
+  }catch(e){
+    console.warn("Live exchange rate fetch failed, using cached/static rates:",e.message);
+  }
+  return null; // caller falls back to getExchangeRates()'s existing cache/static logic
+}
+
 function openSettings(){
   const s=getSettings();
   $("key-input").value=s.apiKey||(HARDCODED_KEY!=="YOUR_API_KEY_HERE"?HARDCODED_KEY:"");
   $("cur-input").value=s.currency||"€";
+  const rates=getExchangeRates();
+  $("rate-mad").value=rates.MAD;
+  $("rate-usd").value=rates.USD;
+  $("rate-gbp").value=rates.GBP;
+  $("rate-xof").value=rates.XOF;
+  renderRatesFetchStatus();
   show("settings-overlay");
+}
+
+function renderRatesFetchStatus(){
+  const el=$("rates-fetch-status");
+  if(!el)return;
+  const cache=getLS(LS_RATES_CACHE,null);
+  if(cache?.fetchedAt){
+    const mins=Math.round((Date.now()-new Date(cache.fetchedAt).getTime())/60000);
+    const ago=mins<60?`${mins}m ago`:mins<1440?`${Math.round(mins/60)}h ago`:`${Math.round(mins/1440)}d ago`;
+    el.textContent=`✓ Live rates last fetched ${ago}`;
+  }else{
+    el.textContent="No live fetch yet — using static defaults until first import or manual refresh";
+  }
+}
+
+async function refreshRatesNow(){
+  const el=$("rates-fetch-status");
+  if(el)el.textContent="Fetching live rates...";
+  // Force a refetch by clearing the cache timestamp check
+  setLS(LS_RATES_CACHE,null);
+  const rates=await fetchLiveExchangeRates();
+  if(rates){
+    $("rate-mad").value=rates.MAD;
+    $("rate-usd").value=rates.USD;
+    $("rate-gbp").value=rates.GBP;
+    $("rate-xof").value=rates.XOF;
+    toast("✓ Live exchange rates refreshed");
+  }else{
+    toast("⚠ Could not fetch live rates — check your connection");
+  }
+  renderRatesFetchStatus();
 }
 function closeSettings(){hide("settings-overlay")}
 function saveSettings(){
   const key=$("key-input").value.trim();
   const err=validateApiKey(key);
   if(err&&key){toast("⚠ "+err);return}
-  setLS(LS.SET,{apiKey:key,currency:$("cur-input").value});
+  const xofRate = parseFloat($("rate-xof").value) || DEFAULT_RATES_TO_EUR.XOF;
+  const rates={
+    MAD: parseFloat($("rate-mad").value) || DEFAULT_RATES_TO_EUR.MAD,
+    USD: parseFloat($("rate-usd").value) || DEFAULT_RATES_TO_EUR.USD,
+    GBP: parseFloat($("rate-gbp").value) || DEFAULT_RATES_TO_EUR.GBP,
+    EUR: 1,
+    XOF: xofRate, XAF: xofRate, // same fixed CFA peg for both
+  };
+  setLS(LS.SET,{apiKey:key,currency:$("cur-input").value,rates});
   closeSettings();toast("Settings saved ✓");
   $("cur-sym").textContent=getCurrency();
 }
@@ -3669,16 +3791,19 @@ function renderAnalytics(hist){
   const settled=hist.filter(h=>h.status!=="pending");
   const won=settled.filter(h=>h.status==="won");
 
-  // ── Real-stake P&L: bets imported from 1xBet carry actual stake/payout in
-  // real currency. App-generated bets have no real stake attached, so those
-  // fall back to a flat 1-unit assumption. Mixing the two directly would be
-  // wrong (e.g. a 500 MAD stake vs a "1 unit" stake aren't comparable) — so
-  // real-money P&L and flat-unit P&L are tracked and shown SEPARATELY.
-  const realStakeBets = settled.filter(h => h.stake!=null && h.stake>0);
-  const flatUnitBets  = settled.filter(h => !(h.stake!=null && h.stake>0));
+  // ── Real-stake P&L: bets imported from 1xBet are converted to EUR ONCE
+  // at import time (stakeEUR/payoutEUR), regardless of what currency the
+  // original bet was placed in. This means P&L stays clean and additive
+  // even if you switch betting currencies later — a MAD bet and a USD bet
+  // both contribute correctly-converted EUR amounts to the same total,
+  // with no live/mixed-currency ambiguity at display time. App-generated
+  // bets have no real stake attached, so those fall back to a flat
+  // 1-unit assumption and are tracked SEPARATELY from real-money P&L.
+  const realStakeBets = settled.filter(h => h.stakeEUR!=null && h.stakeEUR>0);
+  const flatUnitBets  = settled.filter(h => !(h.stakeEUR!=null && h.stakeEUR>0));
 
-  const realStaked = realStakeBets.reduce((a,h)=>a+h.stake,0);
-  const realReturn = realStakeBets.reduce((a,h)=>a+(h.status==="won"?(h.payout??h.stake*(h.odds||1)):0),0);
+  const realStaked = realStakeBets.reduce((a,h)=>a+h.stakeEUR,0);
+  const realReturn = realStakeBets.reduce((a,h)=>a+(h.status==="won"?(h.payoutEUR??h.stakeEUR*(h.odds||1)):0),0);
   const realPL     = realReturn - realStaked;
   const realROI    = realStaked>0 ? ((realPL/realStaked)*100).toFixed(1) : null;
 
@@ -3693,7 +3818,14 @@ function renderAnalytics(hist){
   const headlinePL  = hasReal ? realPL : flatPL;
   const headlineROI = hasReal ? realROI : flatROI;
   const totalUnits  = settled.length;
-  const cur = getCurrency();
+
+  // Real-stake P&L is ALWAYS in EUR now (converted permanently at import
+  // time) — no more currency ambiguity, no more "which currency wins"
+  // question when multiple currencies are imported over time.
+  const cur = hasReal ? "€" : getCurrency();
+  // For transparency: show which original currencies contributed, since the
+  // headline number is now a EUR total that may blend several currencies.
+  const originalCurrencies = [...new Set(realStakeBets.map(h=>h.stakeCurrency).filter(Boolean))];
 
   html("atc-roi",`<div class="roi-display">
     <div class="stat-card"><div class="stat-val" style="color:${headlinePL>=0?GREEN:RED};font-size:20px">${headlinePL>=0?"+":""}${headlinePL.toFixed(2)}${hasReal?" "+cur:" u"}</div><div class="stat-lbl">${hasReal?"Real P&L":"Units P&L"}</div></div>
@@ -3710,7 +3842,9 @@ function renderAnalytics(hist){
       <div style="font-weight:700;color:${flatPL>=0?GREEN:RED}">${flatPL>=0?"+":""}${flatPL.toFixed(2)}u (${flatROI>=0?"+":""}${flatROI}%)</div>
     </div>
   </div>`:""}
-  <p style="font-size:11px;color:var(--t3);margin-top:10px;text-align:center">${hasReal?"Real P&L uses actual stake/payout from 1xBet imports. Flat-unit assumes 1 unit stake for app-generated bets without a recorded stake.":"Assumes 1 unit stake per prediction. Pending bets excluded."}</p>
+  <p style="font-size:11px;color:var(--t3);margin-top:10px;text-align:center">${hasReal?"Real P&L is converted to EUR at import time using the exchange rate active then (editable in Settings), so it stays consistent even across currency switches. Flat-unit assumes 1 unit stake for app-generated bets without a recorded stake.":"Assumes 1 unit stake per prediction. Pending bets excluded."}</p>
+  ${hasReal&&originalCurrencies.length>1?`<p style="font-size:11px;color:var(--t3);margin-top:6px;text-align:center">ℹ Blended from multiple original currencies: ${originalCurrencies.join(", ")} — each converted to EUR individually at its own import time.</p>`:""}
+  ${hasReal&&originalCurrencies.length===1&&originalCurrencies[0]!=="EUR"?`<p style="font-size:11px;color:var(--t3);margin-top:6px;text-align:center">ℹ Original stakes in ${originalCurrencies[0]}, shown here converted to EUR.</p>`:""}
   <div id="roi-growth-chart" style="margin-top:16px"></div>`);
 
   // ── Growth chart: cumulative P&L over time, chronological order ──
@@ -3970,6 +4104,11 @@ function parse1xBetHTML(html){
   const blocks = doc.querySelectorAll(".cupHisNew");
   const bets = [];
   let voidCount = 0; // bets skipped because they were voided/refunded, not won/lost
+  // Snapshot the exchange rates active RIGHT NOW — this locks in the conversion
+  // permanently for this batch of imported bets. If the person updates rates in
+  // Settings later, already-imported bets are unaffected (by design — historical
+  // P&L shouldn't retroactively shift just because today's rate is different).
+  const EXCHANGE_RATES = getExchangeRates();
 
   blocks.forEach(block => {
     try {
@@ -4007,11 +4146,26 @@ function parse1xBetHTML(html){
       const resultMatch = resultText.match(/Result:\s*([\d:()]+)/);
       const result = resultMatch?.[1] || "";
 
+      // Detect the actual currency from the export text itself rather than
+      // assuming MAD — 1xBet exports in whatever currency the account uses
+      // (MAD, EUR, USD, etc). Previously this was hardcoded to only match
+      // "MAD" and the detected unit was discarded entirely — the ROI tab
+      // then displayed the Settings default currency symbol (€) regardless
+      // of what the import actually contained, silently misrepresenting a
+      // MAD stake as if it were Euros (a ~10x difference in real value).
+      const CURRENCY_UNITS = ["MAD","EUR","USD","GBP","KES","NGN","GHS","XOF","XAF"];
+      // \b word boundaries prevent a bare substring match — without them,
+      // "MAD" would match inside any unrelated word containing those three
+      // letters in sequence. Currently harmless given the real HTML structure
+      // (team names live in a different cell than stake/payout), but this
+      // guards against it regardless of future 1xBet markup changes.
+      const _currencyRegex = new RegExp(`\\b(${CURRENCY_UNITS.join("|")})\\b`);
       const allCells = [...block.querySelectorAll("td.ce")];
-      const stakeEl  = allCells.find(td=>td.textContent.includes("MAD")&&!td.querySelector("b"));
+      const stakeEl  = allCells.find(td=>_currencyRegex.test(td.textContent)&&!td.querySelector("b"));
       const stake    = stakeEl ? parseFloat(stakeEl.textContent) : null;
+      const stakeCurrency = stakeEl ? (stakeEl.textContent.match(_currencyRegex)?.[1] || null) : null;
       const payoutEl = block.querySelector("td.ce b");
-      const payout   = payoutEl && payoutEl.textContent.includes("MAD")
+      const payout   = payoutEl && _currencyRegex.test(payoutEl.textContent)
                        ? parseFloat(payoutEl.textContent) : null;
 
       // Normalise
@@ -4058,6 +4212,13 @@ function parse1xBetHTML(html){
         pick:        `${fiqMkt}: ${fiqPick}`,
         market:      fiqMkt,
         odds, stake, payout, result,
+        stakeCurrency, // e.g. "MAD" — the ORIGINAL currency stake/payout are denominated in
+        // Convert to EUR ONCE at import time using whatever rate is active right now.
+        // This is the permanent, stable value used for all P&L/ROI/growth-chart math —
+        // it does NOT get recalculated later even if exchange rates in Settings change,
+        // so historical P&L stays consistent regardless of future currency switches.
+        stakeEUR:  stake!=null  ? +(stake  * (EXCHANGE_RATES[stakeCurrency]||1)).toFixed(2) : null,
+        payoutEUR: payout!=null ? +(payout * (EXCHANGE_RATES[stakeCurrency]||1)).toFixed(2) : null,
         confidence:  estConf,
         status:      status==="win" ? "won" : "lost",
         settledBy:   "1xbet-import",
@@ -4070,9 +4231,17 @@ function parse1xBetHTML(html){
   return bets;
 }
 
-function import1xBet(input){
+async function import1xBet(input){
   const file = input.files[0];
   if(!file) return;
+  // Fetch live exchange rates BEFORE parsing, so this import's currency
+  // conversion uses today's real rate rather than a potentially stale
+  // cached/static one. Silently continues with cached/static rates if the
+  // live fetch fails — this never blocks the import, it's a best-effort
+  // freshness improvement layered on top of the existing fallback chain.
+  const _liveRates = await fetchLiveExchangeRates();
+  if(_liveRates) console.log("Using live exchange rates for this import:", _liveRates);
+
   const reader = new FileReader();
   reader.onload = e => {
     try {

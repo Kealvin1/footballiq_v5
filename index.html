@@ -3596,20 +3596,125 @@ function renderHistoryPage(){
   renderAnalytics(hist);
 }
 
+
+// ── GROWTH CHART — cumulative P&L over time, inline SVG (no external lib needed) ──
+function renderGrowthChart(settled, hasReal, cur){
+  if(settled.length<2){
+    html("roi-growth-chart",`<div class="empty" style="padding:1.5rem"><p style="font-size:12px;color:var(--t3)">Need at least 2 settled bets to show growth over time.</p></div>`);
+    return;
+  }
+  // Sort chronologically — addedAt is when the bet was tracked/placed
+  const sorted=[...settled].sort((a,b)=>new Date(a.addedAt)-new Date(b.addedAt));
+
+  // Build cumulative P&L series. Mix real-stake and flat-unit bets on the
+  // SAME line by converting flat-unit bets to their unit P&L contribution —
+  // this is a relative growth curve, not literal currency, when both types
+  // are mixed. If ALL bets have real stakes, the line is genuine currency P&L.
+  let cum=0;
+  const points=sorted.map(h=>{
+    const hasStake=h.stake!=null&&h.stake>0;
+    const delta = hasStake
+      ? (h.status==="won" ? (h.payout??h.stake*(h.odds||1))-h.stake : -h.stake)
+      : (h.status==="won" ? (h.odds||1)-1 : -1);
+    cum+=delta;
+    return{date:h.addedAt,cum,delta,won:h.status==="won"};
+  });
+
+  const vals=points.map(p=>p.cum);
+  const minV=Math.min(0,...vals),maxV=Math.max(0,...vals);
+  const range=(maxV-minV)||1;
+  const W=680,H=180,padL=44,padR=12,padT=16,padB=24;
+  const plotW=W-padL-padR,plotH=H-padT-padB;
+
+  const xAt=i=>padL+(i/(points.length-1))*plotW;
+  const yAt=v=>padT+plotH-((v-minV)/range)*plotH;
+  const zeroY=yAt(0);
+
+  const linePts=points.map((p,i)=>`${xAt(i).toFixed(1)},${yAt(p.cum).toFixed(1)}`).join(" ");
+  const finalVal=points[points.length-1].cum;
+  const lineColor=finalVal>=0?"#00c896":"#ff4d6a";
+
+  // Area fill under the line back to zero baseline
+  const areaPts=`${xAt(0).toFixed(1)},${zeroY.toFixed(1)} ${linePts} ${xAt(points.length-1).toFixed(1)},${zeroY.toFixed(1)}`;
+
+  // Dots for wins (green) and losses (red) — small markers along the line
+  const dots=points.map((p,i)=>`<circle cx="${xAt(i).toFixed(1)}" cy="${yAt(p.cum).toFixed(1)}" r="2.5" fill="${p.won?"#00c896":"#ff4d6a"}" opacity="0.85"/>`).join("");
+
+  // Y-axis labels: min, zero, max
+  const fmtV=v=>hasReal?`${v>=0?"+":""}${v.toFixed(0)}${cur}`:`${v>=0?"+":""}${v.toFixed(1)}u`;
+
+  const svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" preserveAspectRatio="xMidYMid meet">
+    <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${W-padR}" y2="${zeroY.toFixed(1)}" stroke="var(--border2)" stroke-width="1" stroke-dasharray="3,3"/>
+    <text x="${padL-6}" y="${zeroY.toFixed(1)}" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--t3)">0</text>
+    <text x="${padL-6}" y="${(padT+4)}" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--t3)">${fmtV(maxV)}</text>
+    <text x="${padL-6}" y="${(H-padB)}" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--t3)">${fmtV(minV)}</text>
+    <polygon points="${areaPts}" fill="${lineColor}" opacity="0.12"/>
+    <polyline points="${linePts}" fill="none" stroke="${lineColor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}
+  </svg>`;
+
+  html("roi-growth-chart",`
+    <div class="sec-ttl" style="margin-bottom:8px"><i class="ti ti-chart-line"></i> Growth over time</div>
+    <div style="background:var(--card2);border-radius:10px;padding:14px 10px 10px">${svg}</div>
+    <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:var(--t3)">
+      <span>${fmtDate(sorted[0].addedAt)}</span>
+      <span style="color:${lineColor};font-weight:700">${fmtV(finalVal)} total</span>
+      <span>${fmtDate(sorted[sorted.length-1].addedAt)}</span>
+    </div>`);
+}
+
 function renderAnalytics(hist){
   // Preserve active tab on re-render; only set default if none active yet
   if(!$("atb-roi").classList.contains("active")&&!$("atb-mkt").classList.contains("active")&&!$("atb-cal").classList.contains("active")&&!$("atb-clv").classList.contains("active"))setATab("roi");
   const settled=hist.filter(h=>h.status!=="pending");
   const won=settled.filter(h=>h.status==="won");
-  const totalUnits=settled.length;
-  const profitUnits=won.reduce((a,h)=>a+(h.odds||1)-1,0)-(settled.length-won.length);
-  const roi=totalUnits>0?((profitUnits/totalUnits)*100).toFixed(1):0;
+
+  // ── Real-stake P&L: bets imported from 1xBet carry actual stake/payout in
+  // real currency. App-generated bets have no real stake attached, so those
+  // fall back to a flat 1-unit assumption. Mixing the two directly would be
+  // wrong (e.g. a 500 MAD stake vs a "1 unit" stake aren't comparable) — so
+  // real-money P&L and flat-unit P&L are tracked and shown SEPARATELY.
+  const realStakeBets = settled.filter(h => h.stake!=null && h.stake>0);
+  const flatUnitBets  = settled.filter(h => !(h.stake!=null && h.stake>0));
+
+  const realStaked = realStakeBets.reduce((a,h)=>a+h.stake,0);
+  const realReturn = realStakeBets.reduce((a,h)=>a+(h.status==="won"?(h.payout??h.stake*(h.odds||1)):0),0);
+  const realPL     = realReturn - realStaked;
+  const realROI    = realStaked>0 ? ((realPL/realStaked)*100).toFixed(1) : null;
+
+  const flatTotal  = flatUnitBets.length;
+  const flatWon    = flatUnitBets.filter(h=>h.status==="won");
+  const flatPL     = flatWon.reduce((a,h)=>a+(h.odds||1)-1,0)-(flatTotal-flatWon.length);
+  const flatROI    = flatTotal>0 ? ((flatPL/flatTotal)*100).toFixed(1) : null;
+
+  // Combined headline figure: prefer real-stake ROI when any real-stake bets
+  // exist (it reflects actual money), otherwise fall back to flat-unit ROI.
+  const hasReal = realStakeBets.length>0;
+  const headlinePL  = hasReal ? realPL : flatPL;
+  const headlineROI = hasReal ? realROI : flatROI;
+  const totalUnits  = settled.length;
+  const cur = getCurrency();
+
   html("atc-roi",`<div class="roi-display">
-    <div class="stat-card"><div class="stat-val" style="color:${profitUnits>=0?GREEN:RED};font-size:20px">${profitUnits>=0?"+":""}${profitUnits.toFixed(2)}</div><div class="stat-lbl">Units P&L</div></div>
-    <div class="stat-card"><div class="stat-val" style="color:${roi>=0?GREEN:RED};font-size:20px">${roi>=0?"+":""}${roi}%</div><div class="stat-lbl">ROI</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:${headlinePL>=0?GREEN:RED};font-size:20px">${headlinePL>=0?"+":""}${headlinePL.toFixed(2)}${hasReal?" "+cur:" u"}</div><div class="stat-lbl">${hasReal?"Real P&L":"Units P&L"}</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:${headlineROI>=0?GREEN:RED};font-size:20px">${headlineROI>=0?"+":""}${headlineROI}%</div><div class="stat-lbl">ROI</div></div>
     <div class="stat-card"><div class="stat-val" style="font-size:20px">${totalUnits}</div><div class="stat-lbl">Settled bets</div></div>
   </div>
-  <p style="font-size:11px;color:var(--t3);margin-top:10px;text-align:center">Assumes 1 unit stake per prediction. Pending bets excluded.</p>`);
+  ${hasReal&&flatTotal>0?`<div style="display:flex;gap:10px;margin-top:10px;font-size:11px;color:var(--t2)">
+    <div style="flex:1;padding:8px 10px;background:var(--card2);border-radius:6px">
+      <div style="color:var(--t3);font-size:10px;margin-bottom:2px">REAL STAKES (${realStakeBets.length} bets)</div>
+      <div style="font-weight:700;color:${realPL>=0?GREEN:RED}">${realPL>=0?"+":""}${realPL.toFixed(2)} ${cur} (${realROI>=0?"+":""}${realROI}%)</div>
+    </div>
+    <div style="flex:1;padding:8px 10px;background:var(--card2);border-radius:6px">
+      <div style="color:var(--t3);font-size:10px;margin-bottom:2px">FLAT-UNIT (${flatTotal} bets)</div>
+      <div style="font-weight:700;color:${flatPL>=0?GREEN:RED}">${flatPL>=0?"+":""}${flatPL.toFixed(2)}u (${flatROI>=0?"+":""}${flatROI}%)</div>
+    </div>
+  </div>`:""}
+  <p style="font-size:11px;color:var(--t3);margin-top:10px;text-align:center">${hasReal?"Real P&L uses actual stake/payout from 1xBet imports. Flat-unit assumes 1 unit stake for app-generated bets without a recorded stake.":"Assumes 1 unit stake per prediction. Pending bets excluded."}</p>
+  <div id="roi-growth-chart" style="margin-top:16px"></div>`);
+
+  // ── Growth chart: cumulative P&L over time, chronological order ──
+  renderGrowthChart(settled, hasReal, cur);
 
   // Market accuracy
   const mktMap={};
@@ -3826,7 +3931,25 @@ const XBET_MARKET_MAP = {
   "Team 2 To Keep Clean Sheet": ["Clean Sheet",           "Team 2 - Yes"],
   "Team 1 To Win To Nil - Yes": ["Win to Nil",            "Team 1 - Yes"],
   "Team 2 To Win To Nil - Yes": ["Win to Nil",            "Team 2 - Yes"],
+  "To Qualify - Team 1":        ["To Qualify",           "W1"],
+  "To Qualify - Team 2":        ["To Qualify",           "W2"],
+  "1X":                         ["Double Chance",        "1X"],
+  "2X":                         ["Double Chance",        "2X"],
+  "12":                         ["Double Chance",        "12"],
+  "Lionel Messi To Score A Goal At Any Time - Yes": ["Anytime Goalscorer", "Lionel Messi"],
+  "Handicap 1 (-0.75)":         ["Asian Handicap",       "Team 1 -0.75"],
+  "Handicap 1 (-1)":            ["Asian Handicap",       "Team 1 -1"],
+  "Handicap 2 (-0.75)":         ["Asian Handicap",       "Team 2 -0.75"],
+  "Handicap 2 (-1)":            ["Asian Handicap",       "Team 2 -1"],
+  "Handicap 2 (-2)":            ["Asian Handicap",       "Team 2 -2"],
+  "Handicap 1 (-2)":            ["Asian Handicap",       "Team 1 -2"],
+  "Total Under 1.5 In 60 Minute": ["Over/Under 1.5 Goals (60 min)", "Under 1.5"],
+  "Total Over 1.5 In 60 Minute":  ["Over/Under 1.5 Goals (60 min)", "Over 1.5"],
 };
+
+// Markets not in the map above still import cleanly — the parser falls back
+// to the raw 1xBet market text as both the market label and the pick, so
+// nothing is ever lost even for a market type we haven't explicitly mapped.
 
 const XBET_COMP_MAP = {
   "Football. World Cup 2026":       "World Cup",
@@ -3846,6 +3969,7 @@ function parse1xBetHTML(html){
   const doc = parser.parseFromString(html, "text/html");
   const blocks = doc.querySelectorAll(".cupHisNew");
   const bets = [];
+  let voidCount = 0; // bets skipped because they were voided/refunded, not won/lost
 
   blocks.forEach(block => {
     try {
@@ -3871,9 +3995,15 @@ function parse1xBetHTML(html){
       const odds   = parseFloat(cells[1]?.textContent.trim()) || null;
       const status = cells[2]?.textContent.trim().toLowerCase();
 
-      // Stake + result
-      const resultEl = block.querySelector("td.ha + tr td");
-      const resultText = resultEl?.textContent || "";
+      // Result score. FIX: "td.ha + tr td" is an invalid CSS selector — a <tr>
+      // can never be a sibling of a <td> (td's siblings are only other tds
+      // within the same tr), so this always silently returned null and the
+      // scoreline was never captured. Correct approach: find the <tr> that
+      // CONTAINS td.ha, then get its next-sibling <tr> (that's the row with
+      // "Result: 1:0 (1:0,0:0)"), then read its second <td>.
+      const haRow = block.querySelector("td.ha")?.closest("tr");
+      const resultRow = haRow?.nextElementSibling;
+      const resultText = resultRow?.querySelectorAll("td")[1]?.textContent || "";
       const resultMatch = resultText.match(/Result:\s*([\d:()]+)/);
       const result = resultMatch?.[1] || "";
 
@@ -3899,7 +4029,12 @@ function parse1xBetHTML(html){
       const time = dp.substring(11) || "00:00";
       const isoDate = `${yyyy}-${mm}-${dd}T${time}:00.000Z`;
 
-      if(!betId||!market||(status!=="win"&&status!=="loss")) return;
+      if(!betId||!market)return;
+      // Void/refunded bets (e.g. "100% refund" for abandoned/postponed matches)
+      // are neither a win nor a loss — count them separately so the import
+      // summary can tell the user why fewer bets were imported than expected,
+      // instead of silently vanishing with no explanation.
+      if(status!=="win"&&status!=="loss"){ voidCount++; return; }
 
       // Derive estimated FootballIQ confidence from odds.
       // Since all 1xBet bets were placed based on FootballIQ analysis,
@@ -3931,6 +4066,7 @@ function parse1xBetHTML(html){
     } catch(e){ console.warn("1xBet parse error:", e.message); }
   });
 
+  bets._voidCount = voidCount; // attached for import1xBet's summary message
   return bets;
 }
 
@@ -3941,7 +4077,11 @@ function import1xBet(input){
   reader.onload = e => {
     try {
       const bets = parse1xBetHTML(e.target.result);
-      if(!bets.length){ toast("No bets found in this file"); return; }
+      const voidCount = bets._voidCount || 0;
+      if(!bets.length){
+        toast(voidCount ? `No settled bets found — ${voidCount} voided/refunded bet${voidCount>1?"s":""} skipped (not a win or loss)` : "No bets found in this file");
+        return;
+      }
 
       const existing = getLS(LS.HIST, []);
       const existingIds = new Set(existing.map(h=>h.id));
@@ -3956,7 +4096,10 @@ function import1xBet(input){
       const statusEl = document.getElementById("import-status");
       if(statusEl){
         statusEl.style.display = "block";
-        statusEl.textContent = `✓ Imported ${newBets.length} bets from 1xBet${dupeCount?" ("+dupeCount+" duplicates skipped)":""}. Calibration engine now has ${merged.length} total bets to learn from.`;
+        const parts=[];
+        if(dupeCount)parts.push(`${dupeCount} duplicate${dupeCount>1?"s":""} skipped`);
+        if(voidCount)parts.push(`${voidCount} voided/refunded skipped`);
+        statusEl.textContent = `✓ Imported ${newBets.length} bets from 1xBet${parts.length?" ("+parts.join(", ")+")":""}. Calibration engine now has ${merged.length} total bets to learn from.`;
       }
       renderHistoryPage();
       toast(`✓ ${newBets.length} bets imported from 1xBet`);

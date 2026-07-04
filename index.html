@@ -2620,6 +2620,14 @@ function getCalibrationMemo(targetTier, comp){
   const THRESHOLD = 150;
   const hist=getLS(LS.HIST,[]);
   const settled=hist.filter(h=>h.status==="won"||h.status==="lost");
+  // Confidence-band calibration only has meaningful signal from bets with a
+  // GENUINE AI-stated confidence — 1xBet imports carry a synthetic confidence
+  // estimated from odds (impliedProb+8%), not something the AI predicted.
+  // The 150-bet gate must be checked against genuine-confidence count, not
+  // total settled count — otherwise 100 imported bets + 50 real ones could
+  // pass the "150 bets, calibration is reliable" gate while the confidence
+  // bands/Brier/correction multiplier actually run on only 50 real samples.
+  const _genuineConf = h => h._confidenceSource!=="estimated-from-odds";
 
   const normComp = s => (s||"").toLowerCase().trim();
   const tierOf   = h => getCompTier(h.competition||"");
@@ -2628,15 +2636,21 @@ function getCalibrationMemo(targetTier, comp){
   const sameTier = targetTier ? settled.filter(h => tierOf(h) === targetTier) : [];
   const allSettled = settled; // for cross-tier overview only — never primary
 
+  // Gate on genuine-confidence count specifically — market win-rate stats below
+  // still use the full `primary` set (1xBet included) since bet-outcome
+  // frequency is valid signal regardless of how confidence was generated.
+  const sameCompGenuine = sameComp.filter(_genuineConf).length;
+  const sameTierGenuine = sameTier.filter(_genuineConf).length;
+
   let primary, scopeLabel;
-  if(sameComp.length >= THRESHOLD){
+  if(sameCompGenuine >= THRESHOLD){
     primary    = sameComp;
-    scopeLabel = `${comp} only (${sameComp.length} bets — competition-specific)`;
-  } else if(sameTier.length >= THRESHOLD){
+    scopeLabel = `${comp} only (${sameComp.length} bets, ${sameCompGenuine} genuine-confidence — competition-specific)`;
+  } else if(sameTierGenuine >= THRESHOLD){
     primary    = sameTier;
-    scopeLabel = `Tier ${targetTier} broadly (${sameTier.length} bets — fewer than ${THRESHOLD} ${comp} bets yet)`;
+    scopeLabel = `Tier ${targetTier} broadly (${sameTier.length} bets, ${sameTierGenuine} genuine-confidence — fewer than ${THRESHOLD} ${comp} bets yet)`;
   } else {
-    return ""; // insufficient data — Phase 2 uses pure football analysis
+    return ""; // insufficient genuine-confidence data — Phase 2 uses pure football analysis
   }
 
   const tierNote = `Scope: ${scopeLabel}.`;
@@ -2672,7 +2686,6 @@ function getCalibrationMemo(targetTier, comp){
   // the exact signal this system is designed to measure. Market win-rate stats above
   // still include them (that's genuine bet-outcome data), only confidence-based
   // calibration below excludes them.
-  const _genuineConf = h => h._confidenceSource!=="estimated-from-odds";
   const bands={"50-60%":{p:0,w:0},"60-70%":{p:0,w:0},"70-80%":{p:0,w:0},"80%+":{p:0,w:0}};
   primary.filter(_genuineConf).forEach(h=>{
     const conf=h.confidence||0;

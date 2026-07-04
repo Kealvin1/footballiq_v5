@@ -3728,15 +3728,21 @@ function renderGrowthChart(settled, hasReal, cur){
   // Sort chronologically — addedAt is when the bet was tracked/placed
   const sorted=[...settled].sort((a,b)=>new Date(a.addedAt)-new Date(b.addedAt));
 
-  // Build cumulative P&L series. Mix real-stake and flat-unit bets on the
-  // SAME line by converting flat-unit bets to their unit P&L contribution —
-  // this is a relative growth curve, not literal currency, when both types
-  // are mixed. If ALL bets have real stakes, the line is genuine currency P&L.
+  // Build cumulative P&L series. Uses stakeEUR/payoutEUR (the permanently
+  // converted values from import time) — NOT raw stake/payout, which are
+  // still in the ORIGINAL currency (e.g. MAD). Using raw values here was a
+  // bug: the ROI cards above correctly show EUR-converted P&L, but this
+  // chart was plotting the unconverted MAD figures, producing a total
+  // roughly 10x too large and completely inconsistent with the cards.
+  // Flat-unit bets (no real stake) contribute their unit P&L instead — this
+  // makes the line a relative growth curve rather than literal currency
+  // when both bet types are mixed. If ALL bets have real stakes, the line
+  // is genuine EUR P&L throughout.
   let cum=0;
   const points=sorted.map(h=>{
-    const hasStake=h.stake!=null&&h.stake>0;
+    const hasStake=h.stakeEUR!=null&&h.stakeEUR>0;
     const delta = hasStake
-      ? (h.status==="won" ? (h.payout??h.stake*(h.odds||1))-h.stake : -h.stake)
+      ? (h.status==="won" ? (h.payoutEUR??h.stakeEUR*(h.odds||1))-h.stakeEUR : -h.stakeEUR)
       : (h.status==="won" ? (h.odds||1)-1 : -1);
     cum+=delta;
     return{date:h.addedAt,cum,delta,won:h.status==="won"};

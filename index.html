@@ -785,6 +785,10 @@ select option{background:var(--card2)}
       <div class="prob-bar" id="prob-bar"></div>
       <div class="prob-leg" id="prob-leg"></div>
       <div class="top-pred" id="top-pred"></div>
+      <div id="stale-lineup-banner" style="display:none;align-items:center;justify-content:space-between;gap:10px;background:rgba(255,184,48,0.08);border:1px solid rgba(255,184,48,0.3);border-radius:8px;padding:9px 13px;margin-bottom:10px;font-size:12px">
+        <span style="color:#ffb830"><i class="ti ti-alert-circle" style="margin-right:5px"></i>This cached result only has predicted lineups — confirmed lineups may be available now.</span>
+        <button class="btn-sm" style="font-size:11px;padding:5px 11px;white-space:nowrap" onclick="refreshAnalysis()"><i class="ti ti-refresh"></i> Refresh</button>
+      </div>
       <div class="action-bar" id="action-bar"></div>
     </div>
 
@@ -2323,7 +2327,9 @@ For each significant injury/availability claim that materially affects your anal
 
 NAMED AUTHORITATIVE SOURCES BY COMPETITION — check these FIRST, before falling back to general preview articles which often omit the referee entirely for lower-media-coverage fixtures:
 
-• MLS: Professional Referee Organization (PRO) — proreferees.com — publishes official weekly assignments for every matchday, naming the referee, both assistants, and 4th official. Search "proreferees.com [week/matchday] MLS assignments" or "site:proreferees.com [team1] [team2]". MLSsoccer.com also republishes these as "Professional Referee Organization releases referee assignments for MLS Week [N]" articles.
+• MLS REFEREES: Professional Referee Organization (PRO) — proreferees.com — publishes official weekly assignments for every matchday, naming the referee, both assistants, and 4th official. Search "proreferees.com [week/matchday] MLS assignments" or "site:proreferees.com [team1] [team2]". MLSsoccer.com also republishes these as "Professional Referee Organization releases referee assignments for MLS Week [N]" articles.
+
+• MLS LINEUPS: World Soccer Talk (worldsoccertalk.com) runs genuine dedicated MLS lineup-preview articles (e.g. "Projected lineups for [Team1] vs [Team2]") with real player names for both sides, verified with current examples. SI.com and Sports Mole (sportsmole.co.uk) both also carry reliable "Preview: [Team1] vs [Team2] - prediction, team news, lineups" articles. IMPORTANT: MLS confirmed lineups are typically only released roughly 1 hour before kickoff — Goal.com's own match pages explicitly show "no confirmed lineup currently listed, updates will be added closer to kick-off" for matches previewed earlier in the day. If research runs before that window, only PROJECTED lineups exist yet and should be reported as PREDICTED — this is expected, not a source-coverage failure. For a match confirmed to have already kicked off, search again for the specific confirmed lineup, since it should exist by then; if it still isn't found, that indicates the earlier search happened before confirmation and a fresh search closer to or after kickoff is needed. Search "[team1] [team2] confirmed lineup" or "[team1] vs [team2] starting XI".
 
 • Premier League / EFL: officials are appointed by Pro Ref (renamed from PGMOL for the 2026/27 season — search for either name, older content may still say PGMOL). premierleague.com publishes "Match officials for Matchweek [N]" articles listing referee, assistants, 4th official, and VAR for every fixture — search that exact phrasing with the matchday number, or the two team names plus "match officials".
 
@@ -3075,6 +3081,21 @@ function renderResults(p,fromCache){
   $("r-risk").style.cssText=`background:${rc}18;color:${rc}`;
   // Show lineup status badge
   renderLineupBadges(p._lineupStatus);
+
+  // Stale-prediction nudge: if viewing a CACHED result with only PREDICTED
+  // (not confirmed) lineups, confirmed lineups may now exist — since most
+  // leagues only release them ~1hr before kickoff, a cached result from
+  // earlier that day will keep showing "Predicted" even after confirmed
+  // lineups become available, unless the person hits Refresh. This banner
+  // makes that actionable rather than leaving it silently stale.
+  const _staleBanner=$("stale-lineup-banner");
+  if(_staleBanner){
+    if(fromCache && p._lineupStatus==="predicted"){
+      _staleBanner.style.display="flex";
+    }else{
+      _staleBanner.style.display="none";
+    }
+  }
 
   const wp=p.winProbabilities||{team1:45,draw:25,team2:30};
   // Normalise so bars always sum to 100%

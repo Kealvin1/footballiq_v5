@@ -36,6 +36,14 @@
   --shadow:0 4px 24px rgba(0,0,0,0.12);
   --shadow-gold:0 4px 20px rgba(184,146,42,0.2);
   --shadow-card:0 2px 12px rgba(0,0,0,0.07);
+  /* Subtle raised/hover surfaces + inert track fills. These MUST be theme-aware:
+     the dark theme used white-alpha tints, which are invisible against the light
+     theme's cream background — and light is the DEFAULT theme, so disabled
+     buttons, hover states and every progress/confidence track rendered blank. */
+  --surface:rgba(0,0,0,0.035);
+  --surface-hover:rgba(0,0,0,0.07);
+  --track:rgba(0,0,0,0.10);
+  --sheen:rgba(0,0,0,0.04);
 }
 
 /* ── DARK MODE — near-black luxury ── */
@@ -57,6 +65,10 @@ body.dark{
   --shadow:0 8px 40px rgba(0,0,0,0.6);
   --shadow-gold:0 4px 24px rgba(201,168,76,0.18);
   --shadow-card:0 2px 20px rgba(0,0,0,0.5);
+  --surface:rgba(255,255,255,0.04);
+  --surface-hover:rgba(255,255,255,0.08);
+  --track:rgba(255,255,255,0.06);
+  --sheen:rgba(255,255,255,0.06);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -108,7 +120,7 @@ body.dark .hdr{background:rgba(7,7,15,0.92);border-bottom:1px solid rgba(201,168
   letter-spacing:0.07em;text-transform:uppercase;
   color:var(--t2);cursor:pointer;transition:all .2s;white-space:nowrap;flex-shrink:0;
 }
-.nbtn:hover{color:var(--text);background:rgba(255,255,255,0.04)}
+.nbtn:hover{color:var(--text);background:var(--surface-hover)}
 .nbtn.active{color:var(--gold);background:var(--gold-glow)}
 .nbtn i{font-size:14px}
 .nbadge{
@@ -119,12 +131,12 @@ body.dark .hdr{background:rgba(7,7,15,0.92);border-bottom:1px solid rgba(201,168
 .hdr-acts{display:flex;gap:6px;flex-shrink:0}
 .ibtn{
   width:34px;height:34px;border-radius:8px;
-  background:rgba(255,255,255,0.04);
+  background:var(--surface);
   border:1px solid var(--border);
   display:flex;align-items:center;justify-content:center;
   font-size:15px;color:var(--t2);cursor:pointer;transition:all .2s;
 }
-.ibtn:hover{background:rgba(255,255,255,0.08);color:var(--text);border-color:var(--border2)}
+.ibtn:hover{background:var(--surface-hover);color:var(--text);border-color:var(--border2)}
 
 /* ── LAYOUT ─────────────────────────────────────────────────── */
 .wrap{max-width:780px;margin:0 auto;padding:1.5rem 20px 0}
@@ -142,7 +154,7 @@ body.dark .hdr{background:rgba(7,7,15,0.92);border-bottom:1px solid rgba(201,168
 }
 .card::before{
   content:'';position:absolute;top:0;left:20px;right:20px;height:1px;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);
+  background:linear-gradient(90deg,transparent,var(--sheen),transparent);
   pointer-events:none;
 }
 .card-ttl{
@@ -186,9 +198,9 @@ select option{background:var(--card2)}
 }
 .btn:hover:not(:disabled){opacity:.88;transform:translateY(-1px);box-shadow:0 8px 30px rgba(201,168,76,0.3)}
 .btn:active:not(:disabled){transform:translateY(0)}
-.btn:disabled{background:rgba(255,255,255,0.06);color:var(--t3);cursor:not-allowed;box-shadow:none}
+.btn:disabled{background:var(--track);color:var(--t3);cursor:not-allowed;box-shadow:none}
 .btn-ghost{
-  background:rgba(255,255,255,0.04);color:var(--t2);
+  background:var(--surface);color:var(--t2);
   border:1px solid var(--border);
   font-size:12px;font-weight:600;letter-spacing:0.04em;
   padding:9px 16px;border-radius:var(--rs);cursor:pointer;
@@ -248,7 +260,7 @@ select option{background:var(--card2)}
   margin-bottom:10px;display:flex;align-items:center;gap:6px;
 }
 .phase-label.p0{color:var(--amr)}.phase-label.p1{color:var(--sap)}.phase-label.p2{color:var(--em)}
-.phase-bar{height:3px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;margin-bottom:18px}
+.phase-bar{height:3px;background:var(--track);border-radius:2px;overflow:hidden;margin-bottom:18px}
 .phase-fill{height:100%;border-radius:2px;transition:width .6s ease}
 
 .steps{display:flex;flex-direction:column;gap:10px}
@@ -409,7 +421,7 @@ select option{background:var(--card2)}
 }
 .mkt-rsn{font-size:12px;color:var(--t2);line-height:1.6;margin-top:8px}
 .conf-wrap{display:flex;align-items:center;gap:8px}
-.conf-track{flex:1;height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden}
+.conf-track{flex:1;height:4px;background:var(--track);border-radius:2px;overflow:hidden}
 .conf-fill{height:100%;border-radius:2px;transition:width .6s cubic-bezier(.4,0,.2,1)}
 .conf-pct{font-size:11px;font-weight:700;min-width:32px;color:var(--t2);text-align:right}
 
@@ -508,7 +520,7 @@ select option{background:var(--card2)}
 .ref-k{color:var(--t2);font-weight:500;flex-shrink:0;white-space:nowrap;margin-right:10px}.ref-v{font-weight:700;text-align:right}
 .xg-bar-wrap{margin-bottom:10px}
 .xg-label{display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-bottom:5px}
-.xg-track{height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden}
+.xg-track{height:8px;background:var(--track);border-radius:4px;overflow:hidden}
 .xg-fill{height:100%;border-radius:4px;transition:width .8s cubic-bezier(.4,0,.2,1)}
 .odds-move{
   font-size:12px;color:var(--t2);line-height:1.6;padding:10px 12px;
@@ -613,7 +625,7 @@ select option{background:var(--card2)}
 .h-date{font-size:11px;color:var(--t3);font-weight:500}
 .sw{font-size:10px;font-weight:800;padding:3px 9px;border-radius:5px;background:var(--em-g);color:var(--em);border:1px solid var(--em-b);letter-spacing:.05em}
 .sl{font-size:10px;font-weight:800;padding:3px 9px;border-radius:5px;background:var(--ruby-g);color:var(--ruby);letter-spacing:.05em}
-.sp{font-size:10px;font-weight:800;padding:3px 9px;border-radius:5px;background:rgba(255,255,255,0.05);color:var(--t2);letter-spacing:.05em}
+.sp{font-size:10px;font-weight:800;padding:3px 9px;border-radius:5px;background:var(--surface-hover);color:var(--t2);letter-spacing:.05em}
 .res-btns{display:flex;gap:5px;margin-left:auto}
 .res-btn{padding:4px 11px;font-size:11px;font-weight:700;letter-spacing:.04em;border:1px solid var(--border);border-radius:5px;cursor:pointer;background:var(--card2);color:var(--t2);transition:all .2s}
 .res-btn:hover{background:var(--card3);border-color:var(--border2)}
@@ -938,7 +950,7 @@ select option{background:var(--card2)}
       <input type="password" id="key-input" placeholder="sk-ant-..." autocomplete="off"/>
       <p style="font-size:11px;color:var(--t3);margin-top:5px">Stored in browser only · <a href="https://console.anthropic.com" target="_blank" style="color:var(--em)">console.anthropic.com</a></p>
     </div>
-    <div class="mb12" style="background:var(--gl);border:1px solid rgba(201,168,76,0.2);border-radius:var(--rs);padding:11px 13px">
+    <div class="mb12" style="background:var(--gold-glow);border:1px solid rgba(201,168,76,0.2);border-radius:var(--rs);padding:11px 13px">
       <div style="font-size:12px;font-weight:700;margin-bottom:3px"><i class="ti ti-server" style="color:var(--em)"></i> Odds API key — secured server-side</div>
       <div style="font-size:11px;color:var(--t2)">Set <code style="background:var(--bg);padding:1px 5px;border-radius:3px">ODDS_API_KEY</code> in Netlify → Site settings → Environment variables. Free at <a href="https://the-odds-api.com" target="_blank" style="color:var(--em)">the-odds-api.com</a></div>
     </div>
@@ -1144,7 +1156,26 @@ function fmtDate(iso){return new Date(iso).toLocaleDateString("en-GB",{day:"nume
 
 // ── STORAGE ──
 function getLS(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}}
-function setLS(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){if(e.name==="QuotaExceededError")toast("⚠ Storage full — older cached predictions cleared",3500);}}
+function setLS(k,v){
+  try{localStorage.setItem(k,JSON.stringify(v));return true}
+  catch(e){
+    if(e.name!=="QuotaExceededError"){console.warn("setLS failed:",e.message);return false}
+    // Previously this only showed a toast claiming "older cached predictions
+    // cleared" while clearing nothing — the write silently failed and the user
+    // was told an action had happened that hadn't. Actually free space now by
+    // dropping the analysis cache (the only large, fully regenerable store),
+    // then retry the write once.
+    try{
+      localStorage.removeItem(LS.CACHE);
+      localStorage.setItem(k,JSON.stringify(v));
+      toast("⚠ Storage was full — cached predictions cleared to make room",3500);
+      return true;
+    }catch(_){
+      toast("⚠ Storage full — could not save. Try clearing history.",4000);
+      return false;
+    }
+  }
+}
 function getSettings(){return getLS(LS.SET,{})}
 function validateApiKey(k){
   if(!k||!k.trim())return"API key is empty.";
@@ -1169,9 +1200,19 @@ function cacheSet(key,data){
   try{
     const c=getLS(LS.CACHE,{});
     if(data){c[key]={ts:Date.now(),data}}else{delete c[key]}
-    // keep max 20 entries
-    const keys=Object.keys(c);
-    if(keys.length>20){delete c[keys[0]]}
+    // Evict oldest-by-timestamp until at/below the cap. The previous version
+    // deleted only ONE entry per call and picked Object.keys()[0] — insertion
+    // order, not age — so a repeatedly-refreshed match kept its original slot
+    // and could be evicted while genuinely older entries survived, and a cache
+    // that ever exceeded the cap by more than one could never catch back down.
+    const MAX=20;
+    let keys=Object.keys(c);
+    while(keys.length>MAX){
+      let oldestKey=keys[0],oldestTs=c[keys[0]]?.ts??0;
+      for(const k of keys){const ts=c[k]?.ts??0;if(ts<oldestTs){oldestTs=ts;oldestKey=k}}
+      delete c[oldestKey];
+      keys=Object.keys(c);
+    }
     setLS(LS.CACHE,c);
   }catch{}
 }
@@ -1311,15 +1352,32 @@ function saveSettings(){
   const key=$("key-input").value.trim();
   const err=validateApiKey(key);
   if(err&&key){toast("⚠ "+err);return}
-  const xofRate = parseFloat($("rate-xof").value) || DEFAULT_RATES_TO_EUR.XOF;
-  const rates={
-    MAD: parseFloat($("rate-mad").value) || DEFAULT_RATES_TO_EUR.MAD,
-    USD: parseFloat($("rate-usd").value) || DEFAULT_RATES_TO_EUR.USD,
-    GBP: parseFloat($("rate-gbp").value) || DEFAULT_RATES_TO_EUR.GBP,
-    EUR: 1,
-    XOF: xofRate, XAF: xofRate, // same fixed CFA peg for both
+  // Only persist a rate as a MANUAL OVERRIDE if it actually differs from the
+  // value the fields were pre-filled with. openSettings() populates these
+  // inputs from getExchangeRates(), which already includes live-fetched rates —
+  // and getExchangeRates() gives stored settings priority over live data. So
+  // blindly saving every field meant that simply opening Settings to change the
+  // API key and hitting Save silently froze all exchange rates at that day's
+  // values forever, permanently disabling the automatic daily refresh.
+  const auto=getExchangeRates();
+  const rates={};
+  const takeOverride=(id,key,autoVal)=>{
+    const v=parseFloat($(id).value);
+    if(!isFinite(v)||v<=0)return;                       // ignore blank/invalid
+    if(Math.abs(v-autoVal)<1e-9)return;                 // unchanged → not an override
+    rates[key]=v;
   };
-  setLS(LS.SET,{apiKey:key,currency:$("cur-input").value,rates});
+  takeOverride("rate-mad","MAD",auto.MAD);
+  takeOverride("rate-usd","USD",auto.USD);
+  takeOverride("rate-gbp","GBP",auto.GBP);
+  const xofBefore=Object.keys(rates).length;
+  takeOverride("rate-xof","XOF",auto.XOF);
+  if(Object.keys(rates).length>xofBefore)rates.XAF=rates.XOF; // shared CFA peg
+  // Preserve any unrelated settings keys rather than replacing the whole object.
+  const prev=getSettings();
+  const next={...prev,apiKey:key,currency:$("cur-input").value};
+  if(Object.keys(rates).length)next.rates=rates; else delete next.rates;
+  setLS(LS.SET,next);
   closeSettings();toast("Settings saved ✓");
   $("cur-sym").textContent=getCurrency();
 }
@@ -1410,10 +1468,24 @@ function parseJSON(raw){
   }
   if(end===-1)throw new Error("Response was cut off. Please try again.");
 
-  let jsonStr=text.slice(start,end+1);
+  const jsonStr=text.slice(start,end+1);
 
-  // Step 4: Fix common Claude JSON mistakes
-  jsonStr=jsonStr
+  // Step 4: Parse the extracted slice AS-IS first.
+  // The repair rules in step 5 are deliberately aggressive and are NOT safe to
+  // run unconditionally — they operate on the raw text with no awareness of
+  // string boundaries, so they corrupt valid JSON:
+  //   • /\/\/[^\n]*/ strips "JS comments" but also truncates any URL in a
+  //     string value — {"note":"see https://whoscored.com"} becomes {"note":"see https: → invalid
+  //   • /([{,]\s*)(\w+)\s*:/ quotes "unquoted keys" but also fires inside
+  //     prose — {"note":"Two factors, tempo: Miami"} becomes ..., "tempo": Miami → invalid
+  // Both patterns are realistic in analystNote / chainOfThought, so running
+  // them first turned perfectly valid responses into __MALFORMED__ and burned
+  // an extra repair API call. Parsing first means valid JSON is never touched,
+  // and the repairs still apply to genuinely broken JSON exactly as before.
+  try{ return JSON.parse(jsonStr); }catch(_){}
+
+  // Step 5: Only now — the input is genuinely malformed — attempt repairs.
+  let repairedStr=jsonStr
     .replace(/,([\s\n\r]*[}\]])/g,"$1")  // trailing commas
     .replace(/\/\/[^\n]*/g,"")             // JS-style comments
     .replace(/([{,]\s*)([\w]+)\s*:/g,      // unquoted keys → quoted
@@ -1421,16 +1493,24 @@ function parseJSON(raw){
     .replace(/:\s*undefined/g,":null")        // undefined → null
     .replace(/:\s*NaN/g,":null");             // NaN → null
 
-  // Step 5: Parse — try direct first, then repair, then strict
-  try{ return JSON.parse(jsonStr); }catch(_){
+  try{ return JSON.parse(repairedStr); }catch(_){
     try{
       // Escape unescaped control characters inside strings
-      const repaired=jsonStr.replace(/"(?:[^"\\]|\\.)*"/g,m=>
+      const ctrlFixed=repairedStr.replace(/"(?:[^"\\]|\\.)*"/g,m=>
         m.replace(/[\x00-\x1f]/g,ch=>"\\u"+ch.charCodeAt(0).toString(16).padStart(4,"0"))
       );
-      return JSON.parse(repaired);
+      return JSON.parse(ctrlFixed);
     }catch(_){
-      throw new Error("__MALFORMED__");
+      // Last resort: control-char fix applied to the UNrepaired slice, in case
+      // the step-5 rewrites were themselves what broke it.
+      try{
+        const ctrlOnly=jsonStr.replace(/"(?:[^"\\]|\\.)*"/g,m=>
+          m.replace(/[\x00-\x1f]/g,ch=>"\\u"+ch.charCodeAt(0).toString(16).padStart(4,"0"))
+        );
+        return JSON.parse(ctrlOnly);
+      }catch(_){
+        throw new Error("__MALFORMED__");
+      }
     }
   }
 }
@@ -1517,12 +1597,6 @@ function startPhaseBar(phase){
   }
 }
 
-function advanceStep(phase,totalSteps){
-  const pct=phase===1?(curStep+1)/totalSteps*50:(50+(curStep+1)/totalSteps*50);
-  $("phase-fill").style.width=pct+"%";
-}
-
-
 // ── REFRESH: clear cache for current match and re-run fresh ──────────
 function refreshAnalysis(){
   if(!_curCacheKey){doAnalyze(true);return}
@@ -1554,7 +1628,22 @@ function detectLineupStatus(intelText){
     "sky sports","l\'equipe","marca","as.com","corriere","kicker","goal.com","espn","fotmob",
     "sofascore","official club","club website","qiumiwu","weibo","sina sports","official announcement"];
   const srcCount=KNOWN_SOURCES.filter(s=>tl.includes(s)).length;
-  const nameCount=(t.match(/[A-Z][a-zé-]+ [A-Z][a-zé-]+/g)||[]).length;
+  // Count player-name-like tokens. The original pattern only matched
+  // "Firstname Lastname" in Latin script with é — which returns 0 for every
+  // Chinese Super League, J-League, K-League and Arabic-league match, silently
+  // disabling all the name-count fallbacks below for exactly the competitions
+  // this app explicitly supports. Add script-appropriate patterns:
+  //   • Latin incl. common diacritics and apostrophes (O'Neill, Nuno Espírito)
+  //   • CJK personal names, which are 2-4 contiguous chars with no space
+  //   • Arabic names, two+ words of Arabic script
+  const latinNames=(t.match(/[A-ZÀ-Þ][a-zà-ÿ''\-]+(?:\s+[A-ZÀ-Þ][a-zà-ÿ''\-]+)+/g)||[]).length;
+  const cjkNames=(t.match(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]{2,4}/g)||[]).length;
+  // Arabic: count word TOKENS, not runs. A greedy multi-word pattern collapses
+  // an entire Arabic sentence into a single match (an 11-name lineup scored 1).
+  // Arabic personal names are typically two tokens, so halve the token count.
+  const arabicTokens=(t.match(/[\u0600-\u06ff]{2,}/g)||[]).length;
+  const arabicNames=Math.floor(arabicTokens/2);
+  const nameCount=latinNames+cjkNames+arabicNames;
   // 2+ known sources mentioned AND real player names found → VERIFIED even if LINEUPS: line said CONFIRMED-SINGLE
   if(srcCount>=2&&nameCount>=10)return"verified";
   if(tl.includes("verified")&&(tl.includes("2 source")||tl.includes("two source")||tl.includes("multiple source")||tl.includes("both confirm")))return"verified";
@@ -1570,12 +1659,47 @@ function detectLineupStatus(intelText){
 
 
 // ── COMPETITION TIER — determines data quality available ─────────────
-const TIER1_COMPS=["premier league","la liga","laliga","bundesliga","serie a","ligue 1"];
-const TIER2_COMPS=["champions league","europa league","conference league","world cup","euro ","european championship","nations league","copa america","copa américa","afcon","african cup"];
+// Tier 1 = the five leagues Understat actually covers with real xG, plus the
+// referee/corner CSV databases. Matched EXACTLY, never by substring.
+//
+// Substring matching was a real bug: `"serie a (brazil)".includes("serie a")`
+// is true, so Brazilian Serie A was classified Tier 1 — and so were Ukrainian,
+// Egyptian and Nigerian "Premier League" (match "premier league"), Austrian
+// Bundesliga (matches "bundesliga") and Tunisian Ligue 1 (matches "ligue 1").
+// Six competitions were affected, each with four concrete consequences:
+//   1. quality score inflated by 30pts (Tier 1 scores +40 vs Tier 3's +10)
+//   2. UI badge falsely claimed "Real xG & referee data" that doesn't exist
+//   3. team-stats fetch is gated on tier>=2, so these leagues silently lost
+//      the goal-average fallback their Poisson model actually depends on
+//   4. their settled bets polluted the Tier 1 calibration bucket — precisely
+//      the cross-contamination the tier split exists to prevent
+// Exact matching errs toward under-claiming, which is the safe direction for
+// a data-quality signal: a missed Tier 1 just scores lower, whereas a false
+// Tier 1 makes a claim about data that isn't there.
+const TIER1_EXACT=new Set([
+  "premier league","english premier league","epl",
+  "la liga","laliga","spanish la liga",
+  "serie a","italian serie a",
+  "bundesliga","german bundesliga",
+  "ligue 1","french ligue 1",
+]);
+// Tier 2 = major international/continental competitions. Substring matching is
+// wanted here ("World Cup Qualifiers" should match "world cup"), but each
+// pattern is anchored with word boundaries. The previous list used the literal
+// "euro " WITH a trailing space to stop it matching "Europa League"/"European";
+// that also stopped it matching the plain "Euro" dropdown option, so the actual
+// European Championship scored Tier 3 while its own qualifiers scored Tier 2.
+// \b handles both correctly: \beuro\b matches "Euro" but not "Europa".
+const TIER2_PATTERNS=[
+  /\bchampions league\b/, /\beuropa league\b/, /\bconference league\b/,
+  /\bworld cup\b/, /\beuro\b/, /\beuropean championship\b/,
+  /\bnations league\b/, /\bcopa america\b/, /\bcopa américa\b/,
+  /\bafcon\b/, /\bafrican cup\b/,
+];
 function getCompTier(comp){
-  const c=(comp||"").toLowerCase();
-  if(TIER1_COMPS.some(t=>c.includes(t)))return 1;
-  if(TIER2_COMPS.some(t=>c.includes(t)))return 2;
+  const c=(comp||"").toLowerCase().trim();
+  if(TIER1_EXACT.has(c))return 1;
+  if(TIER2_PATTERNS.some(re=>re.test(c)))return 2;
   return 3;
 }
 function tierLabel(tier){
@@ -1835,8 +1959,12 @@ async function selfConsistencyCheck(p, t1, t2, comp, intel, tier, richness){
     if(!wp)return p;
     const sorted=[wp.team1||0,wp.draw||0,wp.team2||0].sort((a,b)=>b-a);
     const gap=sorted[0]-sorted[1]; // gap between top and second outcome
-    if(gap>=20)return p; // genuinely clear-cut favourite — skip, no extra cost/latency
-    // Gap 20-100: still run check (e.g. 55/25/20 is NOT a banker — draw still very live)
+    // Skip only when the favourite is clear enough that a second read is
+    // unlikely to change anything. NOTE: the previous comment here claimed
+    // "gap 20-100: still run check (e.g. 55/25/20)" — which contradicted this
+    // very line, since 55/25/20 has a gap of 30 and IS skipped. The threshold
+    // below is the actual behaviour; the comment was stale.
+    if(gap>=20)return p;
 
     const checkPrompt=`Quick independent cross-check for ${t1} vs ${t2} (${comp}).
 Based on this same context:
@@ -2083,8 +2211,15 @@ async function doAnalyze(forceRefresh=false){
     _curCacheKey=cacheKey;
     const toCache={...p};
     toCache._hadLiveOdds=!!liveOdds; // preserve flag so quality score is stable in cache
-    delete toCache._liveOdds;  // live odds expire quickly — not worth caching
-    delete toCache._movement;  // raw movement array expires quickly
+    delete toCache._liveOdds;  // live prices genuinely go stale — never cache them
+    // _movement is deliberately KEPT. It was previously deleted while the
+    // derived _movementClass was kept, which left cached results in a
+    // contradictory state: the quality score still awarded +3 for "line
+    // movement data" and the Poisson card still showed the sharp/square
+    // classification, but the Odds tab's movement banner vanished because it
+    // reads _movement. Unlike live prices, opening→current movement is a
+    // historical fact that doesn't invalidate, and the "Cached" tag already
+    // signals the data isn't live.
     toCache._cachedAt=Date.now();
     cacheSet(cacheKey, toCache);
 
@@ -2097,6 +2232,12 @@ async function doAnalyze(forceRefresh=false){
       ? "Response too long even after retry. Please try again."
       : e.message==="__MALFORMED__"
       ? "AI response format error. Please try again."
+      // Refusals can surface from Phase 1, the Phase 2 retry, or the JSON
+      // repair call — none of which are covered by the inline catch around
+      // the first Phase 2 call. Without this branch the raw sentinel string
+      // "__REFUSED__" was shown to the user verbatim.
+      : e.message==="__REFUSED__"
+      ? "The model declined this request (rare false positive from its safety system). Please try again."
       : (e.message||"").includes("timed out")
       ? "Analysis timed out (>4 min). Anthropic may be busy — please try again in a moment."
       : (e.message||"").includes("Network error")
@@ -2508,7 +2649,14 @@ function computeAnalysisQualityScore(p){
   }
 
   // ⑦ Referee data — +4 real API, +2 research-found (Phase 1 web search)
-  const _refResearch=!p._refStatsFound&&p.intelligence?.referee?.name&&
+  // A referee "name" of Unknown/Unconfirmed/TBD is not a found referee — it's
+  // the absence of one. Awarding +2 for it inflated the score on exactly the
+  // matches where referee data was missing (observed live: a card reading
+  // "Unknown · USA" still scored +2).
+  const _refName=(p.intelligence?.referee?.name||"").trim();
+  const _refNameIsReal=_refName.length>2&&
+    !/^(unknown|unconfirmed|tbd|tba|n\/a|not confirmed|not announced|pending)\b/i.test(_refName);
+  const _refResearch=!p._refStatsFound&&_refNameIsReal&&
     (p.intelligence.referee.avgCardsPerGame!=null||p.intelligence.referee.avgYellowPerGame!=null);
   if(p._refStatsFound){
     score+=4;
@@ -2537,7 +2685,6 @@ function computeAnalysisQualityScore(p){
 }
 
 function _qsColor(s){return s>=85?"#00c896":s>=65?"#ffb830":s>=40?"#ff8c42":"#ff4d6a";}
-function _qsLabel(s){return s>=85?"Strong":s>=65?"Good":s>=40?"Moderate":"Weak";}
 
 function renderQualityBadge(qs){
   const col=_qsColor(qs.score);
@@ -3113,7 +3260,12 @@ function renderResults(p,fromCache){
   }
   const _cacheAge=curPred?._cachedAt?Math.round((Date.now()-curPred._cachedAt)/60000):0;
   const _cacheLabel=_cacheAge>0?`<span class="cache-tag"><i class="ti ti-clock" style="font-size:10px"></i> Cached ${_cacheAge<60?_cacheAge+"m ago":Math.round(_cacheAge/60)+"h ago"}</span>`:"";
-  html("action-bar",`<button class="btn-sm" onclick="addToAcca()"><i class="ti ti-plus"></i> Add Top Pick to Acca</button><button class="btn-ghost" onclick="refreshAnalysis()" title="Clear cache and re-run with latest data" style="font-size:11px;padding:6px 13px"><i class="ti ti-refresh-alert"></i> Refresh</button><button class="btn-ghost" onclick="addToAlerts()" title="Get notified when lineups drop for this match" style="font-size:11px;padding:6px 13px"><i class="ti ti-bell"></i> Alert</button><button class="btn-ghost" onclick="sharePredict()" style="font-size:11px;padding:6px 13px"><i class="ti ti-share"></i> Share</button>${_cacheLabel}`);
+  // Reflect current monitoring state so the Alert button can toggle OFF as
+  // well as on — previously removeFromAlerts() existed but nothing called it,
+  // so an alert added by mistake (or with a mistyped kickoff time) could never
+  // be removed and the shortlist was invisible to the user.
+  const _alertOn=isAlertActive(curPred?.team1,curPred?.team2);
+  html("action-bar",`<button class="btn-sm" onclick="addToAcca()"><i class="ti ti-plus"></i> Add Top Pick to Acca</button><button class="btn-ghost" onclick="refreshAnalysis()" title="Clear cache and re-run with latest data" style="font-size:11px;padding:6px 13px"><i class="ti ti-refresh-alert"></i> Refresh</button><button class="btn-ghost" id="alert-btn" onclick="toggleAlert()" title="${_alertOn?"Stop monitoring this match":"Get notified when lineups drop for this match"}" style="font-size:11px;padding:6px 13px;${_alertOn?"border-color:var(--gold-border);color:var(--gold)":""}"><i class="ti ti-${_alertOn?"bell-ringing":"bell"}"></i> ${_alertOn?"Alerting":"Alert"}</button><button class="btn-ghost" onclick="sharePredict()" style="font-size:11px;padding:6px 13px"><i class="ti ti-share"></i> Share</button>${_cacheLabel}`);
 
   if(p.analystNote){
     show("an-note");
@@ -4403,11 +4555,38 @@ function getAlertShortlist(){
   if(pruned.length !== sl.length) setAlertShortlist(pruned); // persist the cleanup
   return pruned;
 }
-function setAlertShortlist(v){ localStorage.setItem(LS_ALERT, JSON.stringify(v)); }
+function setAlertShortlist(v){ setLS(LS_ALERT, v); } // use shared helper so quota handling applies
 function removeFromAlerts(team1, team2){
   const sl = getAlertShortlist().filter(a => !(a.team1===team1 && a.team2===team2));
   setAlertShortlist(sl);
   toast("Removed from alerts");
+}
+function isAlertActive(team1, team2){
+  if(!team1||!team2)return false;
+  return getAlertShortlist().some(a => a.team1===team1 && a.team2===team2);
+}
+// Single entry point used by the Alert button — adds if not monitoring,
+// removes if already monitoring, then re-renders so the button reflects state.
+function toggleAlert(){
+  if(!curPred){toast("Run an analysis first");return}
+  if(isAlertActive(curPred.team1,curPred.team2)){
+    removeFromAlerts(curPred.team1,curPred.team2);
+  }else{
+    addToAlerts();
+  }
+  // Update just the button in place. A full renderResults() re-render would
+  // also call setTab("overview"), yanking the user back to the Overview tab
+  // as a side effect of toggling an alert.
+  refreshAlertButton();
+}
+function refreshAlertButton(){
+  const btn=document.getElementById("alert-btn");
+  if(!btn||!curPred)return;
+  const on=isAlertActive(curPred.team1,curPred.team2);
+  btn.innerHTML=`<i class="ti ti-${on?"bell-ringing":"bell"}"></i> ${on?"Alerting":"Alert"}`;
+  btn.title=on?"Stop monitoring this match":"Get notified when lineups drop for this match";
+  btn.style.borderColor=on?"var(--gold-border)":"";
+  btn.style.color=on?"var(--gold)":"";
 }
 
 function addToAlerts(){

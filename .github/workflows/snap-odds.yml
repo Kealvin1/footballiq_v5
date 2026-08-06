@@ -1,26 +1,41 @@
 name: Snapshot Odds (Smart Frequency)
 
-# Runs every 15 minutes throughout the day.
-# The snap-odds.js script itself is smart about what it does:
-# - If a fixture is imminent (within 2h): saves a high-resolution
-#   movement snapshot so the odds.js function can show sharp-money
-#   signals at fine resolution during the actual betting window.
-# - Otherwise: saves the opening-line snapshot once per sport per day
-#   (same as before) and does nothing else.
-# This keeps GitHub Actions minutes well within the free tier while
-# capturing meaningful line-movement data only when it matters.
-
+# The snap-odds.js script is smart about WHAT it does per run:
+# - Fixture imminent (within 2h): high-resolution movement snapshot so
+#   odds.js can show sharp-money signals during the real betting window.
+# - Otherwise: opening-line snapshot once per sport per day, then exits.
+#
+# NOTE ON SCHEDULING: the cron below is offset to :07/:22/:37/:52 rather
+# than the exact quarter-hour. GitHub's scheduler is heavily oversubscribed
+# at :00/:15/:30/:45 — scheduled runs queued at those slots are the ones
+# most often delayed or dropped entirely, which is the most likely cause of
+# a run reporting "All jobs were cancelled" with no error in any step.
+# Shifting a few minutes off the hour boundary measurably improves
+# reliability and costs nothing.
 on:
   schedule:
-    - cron: '*/15 * * * *'   # every 15 minutes
-  workflow_dispatch:          # manual trigger for testing
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+# Queue overlapping runs instead of letting them collide.
+# There was no concurrency control before. GitHub scheduled events are
+# routinely delayed under load, so two runs CAN overlap — and when they do,
+# both reach the `git push` step and one is rejected as non-fast-forward.
+# cancel-in-progress:false means a late run waits its turn rather than
+# killing the in-flight one (cancelling would lose that snapshot entirely).
+concurrency:
+  group: snap-odds
+  cancel-in-progress: false
+
 jobs:
   snap-odds:
     runs-on: ubuntu-latest
+    # Bounded so a hung API call can't occupy a runner for the default 6 hours.
+    timeout-minutes: 10
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -30,19 +45,53 @@ jobs:
         with:
           node-version: '20'
 
+      # Only runs if package.json declares dependencies. The previous version
+      # went straight to `node scripts/snap-odds.js` with no install step, so
+      # the script would crash on its first require() of any third-party module.
+      # Harmless no-op if the script only uses Node built-ins.
+      - name: Install dependencies (if any)
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --omit=dev || npm install --omit=dev
+          elif [ -f package.json ]; then
+            npm install --omit=dev
+          else
+            echo "No package.json — skipping install."
+          fi
+
       - name: Run odds snapshot script
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: node scripts/snap-odds.js
 
+      # Rebase-then-retry. The old version did a bare `git push`, which fails
+      # outright with a non-fast-forward error if ANY other commit landed on
+      # main since checkout — another snapshot run, or a normal push to
+      # index.html. Retrying on top of the latest main makes the job resilient
+      # to that race instead of failing the whole run.
       - name: Commit and push any new snapshot files
         run: |
-          git config user.name "github-actions[bot]"
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add data/
           if git diff --cached --quiet; then
             echo "No new snapshots to commit."
-          else
-            git commit -m "Snapshot odds $(date -u +%Y-%m-%d_%H-%M)"
-            git push
+            exit 0
           fi
+
+          git commit -m "Snapshot odds $(date -u +%Y-%m-%d_%H-%M)"
+
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "Pushed on attempt $attempt."
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt) — rebasing onto latest main and retrying."
+            git pull --rebase --autostash origin main
+            sleep 5
+          done
+
+          echo "::error::Push failed after 3 rebase attempts."
+          exit 1

@@ -24,8 +24,18 @@
   --bg:#f5f3ee;--bg2:#edeae3;--card:#ffffff;--card2:#f9f7f2;--card3:#f2efe8;
   --border:rgba(0,0,0,0.08);--border2:rgba(0,0,0,0.14);
   --gold:#b8922a;--gold-l:#d4a840;--gold-d:#8a6c1e;
-  --gold-glow:rgba(184,146,42,0.1);--gold-border:rgba(184,146,42,0.3);
-  --gold-border2:rgba(184,146,42,0.55);
+  /* Raw gold channels. Every translucent gold in the sheet derives from this
+     one token so a theme swap moves ALL of them together. Roughly two dozen
+     rules previously hardcoded rgba(201,168,76,...) — the DARK gold — which
+     rendered against the cream light background even though light is default. */
+  --gold-rgb:184,146,42;
+  --gold-glow:rgba(var(--gold-rgb),0.1);--gold-border:rgba(var(--gold-rgb),0.3);
+  --gold-border2:rgba(var(--gold-rgb),0.55);
+  /* Tint strengths for gold-washed surfaces. Light mode needs MORE alpha than
+     dark to read at all against cream; dark mode needs less before it glares. */
+  --gold-wash-a:0.10;--gold-wash-b:0.035;
+  --gold-hairline:rgba(var(--gold-rgb),0.22);
+  --gold-hover:rgba(var(--gold-rgb),0.18);
   --em:#00a878;--em-g:rgba(0,168,120,0.1);--em-b:rgba(0,168,120,0.25);
   --sap:#2b7de0;--sap-g:rgba(43,125,224,0.1);
   --ruby:#d93050;--ruby-g:rgba(217,48,80,0.09);
@@ -34,8 +44,16 @@
   --text:#16162a;--t2:#5c5c78;--t3:#9898b8;
   --r:16px;--rs:10px;
   --shadow:0 4px 24px rgba(0,0,0,0.12);
-  --shadow-gold:0 4px 20px rgba(184,146,42,0.2);
+  --shadow-gold:0 4px 20px rgba(var(--gold-rgb),0.2);
   --shadow-card:0 2px 12px rgba(0,0,0,0.07);
+  /* Overlay/elevation shadows. These were hardcoded at 0.4-0.8 black — tuned
+     for the near-black dark theme, but on cream they read as heavy grey
+     smudges. Light mode gets much lower alpha; dark keeps the original values. */
+  --shadow-modal:0 24px 60px rgba(0,0,0,0.16);
+  --shadow-toast:0 8px 28px rgba(0,0,0,0.14);
+  --shadow-avatar:0 4px 14px rgba(0,0,0,0.14);
+  --shadow-btn-hover:0 8px 24px rgba(var(--gold-rgb),0.28);
+  --glow-strong:0.30;--glow-soft:0.20;
   /* Subtle raised/hover surfaces + inert track fills. These MUST be theme-aware:
      the dark theme used white-alpha tints, which are invisible against the light
      theme's cream background — and light is the DEFAULT theme, so disabled
@@ -54,8 +72,13 @@ body.dark{
   --bg:#07070f;--bg2:#0c0c18;--card:#0f0f1c;--card2:#141426;--card3:#191930;
   --border:rgba(255,255,255,0.055);--border2:rgba(255,255,255,0.09);
   --gold:#c9a84c;--gold-l:#e8c56a;--gold-d:#9a7d35;
-  --gold-glow:rgba(201,168,76,0.14);--gold-border:rgba(201,168,76,0.28);
-  --gold-border2:rgba(201,168,76,0.5);
+  --gold-rgb:201,168,76;
+  --gold-glow:rgba(var(--gold-rgb),0.14);--gold-border:rgba(var(--gold-rgb),0.28);
+  --gold-border2:rgba(var(--gold-rgb),0.5);
+  /* Dark surfaces need a lighter touch — these are the original tuned values. */
+  --gold-wash-a:0.12;--gold-wash-b:0.03;
+  --gold-hairline:rgba(var(--gold-rgb),0.10);
+  --gold-hover:rgba(var(--gold-rgb),0.20);
   --em:#00c896;--em-g:rgba(0,200,150,0.1);--em-b:rgba(0,200,150,0.22);
   --sap:#4d9fff;--sap-g:rgba(77,159,255,0.1);
   --ruby:#ff4d6a;--ruby-g:rgba(255,77,106,0.1);
@@ -63,8 +86,13 @@ body.dark{
   --gray:#606080;
   --text:#eeeef8;--t2:#8888aa;--t3:#44445e;
   --shadow:0 8px 40px rgba(0,0,0,0.6);
-  --shadow-gold:0 4px 24px rgba(201,168,76,0.18);
+  --shadow-gold:0 4px 24px rgba(var(--gold-rgb),0.18);
   --shadow-card:0 2px 20px rgba(0,0,0,0.5);
+  --shadow-modal:0 24px 80px rgba(0,0,0,0.8);
+  --shadow-toast:0 8px 40px rgba(0,0,0,0.6);
+  --shadow-avatar:0 4px 20px rgba(0,0,0,0.4);
+  --shadow-btn-hover:0 8px 30px rgba(var(--gold-rgb),0.3);
+  --glow-strong:0.40;--glow-soft:0.30;
   --surface:rgba(255,255,255,0.04);
   --surface-hover:rgba(255,255,255,0.08);
   --track:rgba(255,255,255,0.06);
@@ -98,7 +126,7 @@ body.dark .hdr{background:rgba(7,7,15,0.92);border-bottom:1px solid rgba(201,168
   background:linear-gradient(135deg,var(--gold-d),var(--gold),var(--gold-l));
   display:flex;align-items:center;justify-content:center;
   color:#000;font-size:17px;
-  box-shadow:var(--shadow-gold),0 0 0 1px rgba(201,168,76,0.2);
+  box-shadow:var(--shadow-gold),0 0 0 1px rgba(var(--gold-rgb),0.2);
 }
 .logo-text{
   font-size:16px;font-weight:900;letter-spacing:0.06em;
@@ -196,7 +224,7 @@ select option{background:var(--card2)}
   transition:all .2s;
   box-shadow:var(--shadow-gold);
 }
-.btn:hover:not(:disabled){opacity:.88;transform:translateY(-1px);box-shadow:0 8px 30px rgba(201,168,76,0.3)}
+.btn:hover:not(:disabled){opacity:.88;transform:translateY(-1px);box-shadow:var(--shadow-btn-hover)}
 .btn:active:not(:disabled){transform:translateY(0)}
 .btn:disabled{background:var(--track);color:var(--t3);cursor:not-allowed;box-shadow:none}
 .btn-ghost{
@@ -213,7 +241,7 @@ select option{background:var(--card2)}
   border:1px solid var(--gold-border);cursor:pointer;
   display:inline-flex;align-items:center;gap:5px;transition:all .2s;
 }
-.btn-sm:hover{background:rgba(201,168,76,0.2)}
+.btn-sm:hover{background:var(--gold-hover)}
 .btn-danger{
   padding:7px 13px;font-size:11px;font-weight:700;letter-spacing:0.06em;
   border-radius:7px;background:var(--ruby-g);color:var(--ruby);
@@ -247,7 +275,7 @@ select option{background:var(--card2)}
 .ld-icon::after{
   content:'';position:absolute;inset:-14px;border-radius:50%;
   border:1px solid transparent;
-  border-top-color:rgba(201,168,76,0.25);
+  border-top-color:rgba(var(--gold-rgb),0.25);
   animation:orb-spin-r 3s linear infinite;
 }
 .ld-icon i{font-size:28px;color:var(--gold);animation:orb-pulse 2s ease-in-out infinite}
@@ -288,7 +316,7 @@ select option{background:var(--card2)}
   display:flex;align-items:center;justify-content:center;
   font-size:16px;font-weight:900;color:#000;
   margin:0 auto 10px;letter-spacing:.05em;
-  box-shadow:0 4px 20px rgba(0,0,0,0.4);
+  box-shadow:var(--shadow-avatar);
 }
 .team-name{font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px;margin:0 auto}
 .team-xg{font-size:11px;color:var(--t2);margin-top:3px;font-weight:500}
@@ -304,20 +332,20 @@ select option{background:var(--card2)}
 
 /* ── TOP PREDICTION ─────────────────────────────────────────── */
 .top-pred{
-  background:linear-gradient(135deg,rgba(201,168,76,0.12) 0%,rgba(201,168,76,0.04) 100%);
+  background:linear-gradient(135deg,rgba(var(--gold-rgb),var(--gold-wash-a)) 0%,rgba(var(--gold-rgb),var(--gold-wash-b)) 100%);
   border:1px solid var(--gold-border);border-radius:var(--rs);
   padding:18px 20px;display:flex;align-items:center;
   justify-content:space-between;gap:14px;margin-top:1.2rem;
-  box-shadow:inset 0 1px 0 rgba(201,168,76,0.1);
+  box-shadow:inset 0 1px 0 rgba(var(--gold-rgb),0.14);
 }
 .tp-lbl{font-size:9px;font-weight:800;color:var(--gold);margin-bottom:4px;letter-spacing:.15em;text-transform:uppercase}
 .tp-pick{font-size:17px;font-weight:700;letter-spacing:-.01em}
-.tp-odds{font-size:36px;font-weight:900;color:var(--gold);line-height:1;text-align:right;text-shadow:0 0 30px rgba(201,168,76,0.4)}
+.tp-odds{font-size:36px;font-weight:900;color:var(--gold);line-height:1;text-align:right;text-shadow:0 0 30px rgba(var(--gold-rgb),var(--glow-strong))}
 .tp-conf{font-size:11px;color:var(--t2);margin-top:4px;font-weight:500}
 .vtag{font-size:9px;font-weight:800;background:var(--gold);color:#000;padding:2px 7px;border-radius:4px;margin-left:6px;letter-spacing:.06em}
 .action-bar{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
 .an-note{
-  border-left:2px solid var(--gold);background:rgba(201,168,76,0.05);
+  border-left:2px solid var(--gold);background:rgba(var(--gold-rgb),0.06);
   border-radius:0 var(--rs) var(--rs) 0;padding:13px 16px;margin-bottom:12px;
 }
 .an-lbl{font-size:9px;font-weight:800;color:var(--gold);margin-bottom:5px;letter-spacing:.12em;text-transform:uppercase}
@@ -404,7 +432,7 @@ select option{background:var(--card2)}
   transition:border-color .2s,background .2s;
 }
 .mkt-card:hover{border-color:var(--border2);background:var(--card3)}
-.mkt-card.val{border-color:var(--gold-border);background:linear-gradient(135deg,rgba(201,168,76,0.06),rgba(201,168,76,0.02));padding-right:62px}
+.mkt-card.val{border-color:var(--gold-border);background:linear-gradient(135deg,rgba(var(--gold-rgb),0.07),rgba(var(--gold-rgb),0.025));padding-right:62px}
 .mkt-vtag{
   position:absolute;top:11px;right:11px;z-index:1;
   background:var(--gold);color:#000;font-size:9px;font-weight:800;
@@ -433,7 +461,7 @@ select option{background:var(--card2)}
 }
 .bk-card.best{
   border-color:var(--gold-border);background:var(--gold-glow);
-  box-shadow:0 0 0 1px rgba(201,168,76,0.1);
+  box-shadow:0 0 0 1px var(--gold-hairline);
 }
 .bk-name{font-size:10px;color:var(--t3);margin-bottom:5px;font-weight:600}
 .bk-odds{font-size:18px;font-weight:800;color:var(--text)}
@@ -460,7 +488,7 @@ select option{background:var(--card2)}
   display:flex;align-items:center;gap:14px;transition:all .2s;
 }
 .score-row:hover{border-color:var(--border2)}
-.score-row.top{border-color:var(--gold-border);background:linear-gradient(135deg,rgba(201,168,76,0.07),rgba(201,168,76,0.02))}
+.score-row.top{border-color:var(--gold-border);background:linear-gradient(135deg,rgba(var(--gold-rgb),0.08),rgba(var(--gold-rgb),0.025))}
 .s-rank{font-size:12px;color:var(--t3);min-width:16px;text-align:center;font-weight:700}
 .s-val{font-size:22px;font-weight:800;min-width:52px;letter-spacing:.02em}
 .s-pct{font-size:11px;color:var(--t2);min-width:30px;text-align:right;font-weight:600}
@@ -561,7 +589,7 @@ select option{background:var(--card2)}
   font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
   padding:7px 14px;border-radius:7px;cursor:pointer;white-space:nowrap;transition:all .2s;
 }
-.fix-go:hover{background:rgba(201,168,76,0.2)}
+.fix-go:hover{background:var(--gold-hover)}
 .fix-list{display:flex;flex-direction:column;gap:8px}
 
 /* ── ACCUMULATOR ────────────────────────────────────────────── */
@@ -583,15 +611,15 @@ select option{background:var(--card2)}
 .acca-rm{color:var(--ruby);background:none;border:none;font-size:18px;cursor:pointer;padding:2px;line-height:1;flex-shrink:0;opacity:.6;transition:opacity .2s}
 .acca-rm:hover{opacity:1}
 .acca-sum{
-  background:linear-gradient(135deg,rgba(201,168,76,0.08),rgba(201,168,76,0.02));
+  background:linear-gradient(135deg,rgba(var(--gold-rgb),0.09),rgba(var(--gold-rgb),0.025));
   border:1px solid var(--gold-border);border-radius:var(--r);
   padding:16px;margin-bottom:14px;
 }
-.acca-sum-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(201,168,76,0.1)}
+.acca-sum-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--gold-hairline)}
 .acca-sum-row:last-child{border-bottom:none}
 .a-lbl{font-size:11px;color:var(--t2);font-weight:600;letter-spacing:.04em}
 .a-val{font-size:15px;font-weight:800}
-.a-big{font-size:34px;font-weight:900;color:var(--gold);text-shadow:0 0 20px rgba(201,168,76,0.3)}
+.a-big{font-size:34px;font-weight:900;color:var(--gold);text-shadow:0 0 20px rgba(var(--gold-rgb),var(--glow-soft))}
 .acca-actions{display:flex;gap:8px}
 .leg-row{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
 .leg-nc{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0}
@@ -646,7 +674,7 @@ select option{background:var(--card2)}
   background:var(--card);border-radius:var(--r);
   border:1px solid var(--border2);
   padding:2rem;width:100%;max-width:440px;max-height:90vh;overflow-y:auto;
-  box-shadow:0 24px 80px rgba(0,0,0,0.8);
+  box-shadow:var(--shadow-modal);
   animation:fade-in .2s ease;
 }
 .modal-ttl{font-size:18px;font-weight:900;margin-bottom:4px;letter-spacing:-.02em}
@@ -659,7 +687,7 @@ select option{background:var(--card2)}
   background:var(--card2);color:var(--text);font-size:13px;font-weight:600;
   padding:11px 22px;border-radius:100px;z-index:300;
   border:1px solid var(--border2);
-  box-shadow:0 8px 40px rgba(0,0,0,0.6);
+  box-shadow:var(--shadow-toast);
   transition:opacity .3s;pointer-events:none;white-space:nowrap;
 }
 .toast.hidden{opacity:0}
@@ -679,7 +707,7 @@ select option{background:var(--card2)}
 .mb8{margin-bottom:8px}.mb12{margin-bottom:12px}.mb14{margin-bottom:14px}.mb16{margin-bottom:16px}
 .row-between{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
 .sub-banner{
-  background:linear-gradient(135deg,rgba(201,168,76,0.1),rgba(201,168,76,0.04));
+  background:linear-gradient(135deg,rgba(var(--gold-rgb),var(--gold-wash-a)),rgba(var(--gold-rgb),var(--gold-wash-b)));
   border:1px solid var(--gold-border);border-radius:var(--rs);
   padding:14px 16px;margin-bottom:14px;display:flex;align-items:flex-start;gap:12px;
 }
@@ -2469,8 +2497,8 @@ Only report what you actually find — if none of this is mentioned anywhere, th
 Search 2 → "${t1} ${t2} head to head history all meetings referee ${comp}"
   Find: ALL previous meetings between these two teams with results. Named referee and their reputation/stats — if possible, try to spot the referee name in a second source too (e.g. a separate preview article) to corroborate it. Venue and competition context.
 
-Search 2b (if referee not found above) → "${t1} ${t2} referee 2026 World Cup appointed"
-  Find: Who is refereeing this specific match and their known tendencies.
+Search 2b (if referee not found above) → "${t1} ${t2} referee ${comp} appointed ${new Date().getFullYear()}"
+  Find: Who is refereeing this specific match and their known tendencies. Use the ACTUAL competition name above — a query naming the wrong competition (e.g. asking about a World Cup appointment for a J-League or Premier League fixture) returns nothing useful and wastes the search. If the competition-specific query fails, fall back to the plain "${t1} ${t2} referee appointed" without any competition qualifier rather than guessing at a tournament name.
 
 Search 3 → "${t1} ${t2} stadium venue city ${comp} preview weather odds"
   Find: The ACTUAL confirmed venue/stadium and city for this specific match first — do not assume it is either team's home ground unless confirmed. Then find weather forecast at that real venue, competition context, current market odds, any line movement or sharp money signals.
@@ -2597,9 +2625,6 @@ SET-PIECE INTELLIGENCE — search for:
 
 HARD CAP: your entire response must not exceed 6,000 tokens — prioritise lineups, injuries and player metrics; compress H2H to score-lines only.`;
 }
-
-// ── CALIBRATION MEMO — feeds prediction history back into Phase 2 ──
-
 
 // ═══════════════════════════════════════════════════════════
 //  ANALYSIS QUALITY SCORE — 0 to 100
@@ -2990,6 +3015,10 @@ function extractXGFromIntel(intel, t1, t2){
   return { lH, lA };
 }
 
+// ── CALIBRATION MEMO — feeds settled prediction history back into Phase 2 ──
+// Called from buildAnalysisPrompt(). Returns "" (no calibration block at all)
+// until there are enough genuine-confidence settled bets at competition or
+// tier scope; below that threshold Phase 2 runs on pure football analysis.
 function getCalibrationMemo(targetTier, comp){
   // 150-bet threshold per competition, then per tier, then no calibration.
   // Below 150 at every level → pure football analysis (no calibration bias).
@@ -3669,13 +3698,22 @@ function buildOddsTab(p,c1,c2){
   // Show line movement if available
   let moveHtml="";
   if(mv&&mv.length>0){
-    const matchMv=mv.find(m=>{
-      const n=s=>s.toLowerCase().replace(/[^a-z0-9]/g,"");
-      return n(m.home_team).includes(n(p.team1))||n(p.team1).includes(n(m.home_team));
-    });
+    // Reuse the same bidirectional matcher the live-odds lookup uses. Matching
+    // on home_team ALONE was both too loose (any fixture featuring team1 — even
+    // against a different opponent — could match) and too strict (a feed that
+    // lists this fixture flipped never matched, silently hiding the banner).
+    const matchMv=matchToTeam(mv,p.team1,p.team2);
     if(matchMv){
-      const dir=matchMv.move_w1>0.15?"🔴 Sharp money on HOME (line shortened)"
-               :matchMv.move_w1<-0.15?"🔵 Money drifting from HOME (line drifted)"
+      // move_w1/open_w1/current_w1 always describe the FEED's home side, which
+      // is not necessarily the team the user entered as team1. Resolve the real
+      // orientation before labelling, otherwise a flipped feed reports sharp
+      // money on the wrong team — worse than showing nothing at all.
+      const _nm=s=>(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+      const _t1IsFeedHome=_nm(matchMv.home_team).includes(_nm(p.team1))||_nm(p.team1).includes(_nm(matchMv.home_team));
+      const feedHome=_t1IsFeedHome?p.team1:p.team2;
+      const feedAway=_t1IsFeedHome?p.team2:p.team1;
+      const dir=matchMv.move_w1>0.15?`🔴 Sharp money on ${esc(feedHome)} (line shortened)`
+               :matchMv.move_w1<-0.15?`🔵 Money drifting from ${esc(feedHome)} (line drifted)`
                :"⚪ Normal market movement";
       const _sharpClass=p._movementClass;
       moveHtml=`<div style="background:rgba(186,117,23,.08);border:1px solid rgba(186,117,23,.25);border-radius:var(--rs);padding:12px 14px;margin-bottom:14px">
@@ -3684,8 +3722,8 @@ function buildOddsTab(p,c1,c2){
           ${_sharpClass?`<div style="font-size:11px;padding:2px 8px;border-radius:4px;background:${_sharpClass.classification==="SHARP"?"rgba(255,184,48,0.12)":"rgba(100,100,100,0.12)"};color:${_sharpClass.classification==="SHARP"?"#ffb830":"var(--t2)"}">${_sharpClass.label}</div>`:""}
         </div>
         <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px">
-          <div><span style="color:var(--t2)">Home win:</span> <strong>${matchMv.open_w1}</strong> → <strong style="color:var(--em)">${matchMv.current_w1}</strong></div>
-          ${matchMv.open_w2?`<div><span style="color:var(--t2)">Away win:</span> <strong>${matchMv.open_w2}</strong> → <strong>${matchMv.current_w2}</strong></div>`:""}
+          <div><span style="color:var(--t2)">${esc(feedHome)} win:</span> <strong>${matchMv.open_w1}</strong> → <strong style="color:var(--em)">${matchMv.current_w1}</strong></div>
+          ${matchMv.open_w2?`<div><span style="color:var(--t2)">${esc(feedAway)} win:</span> <strong>${matchMv.open_w2}</strong> → <strong>${matchMv.current_w2}</strong></div>`:""}
         </div>
         <div style="font-size:12px;color:var(--amr);margin-top:8px">${dir}</div>
         <div style="font-size:11px;color:var(--t2);margin-top:4px">${matchMv.signal}</div>

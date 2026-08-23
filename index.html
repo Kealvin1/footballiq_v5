@@ -1140,7 +1140,7 @@ const STEPS_P2=[
   {icon:"ti-file-text",      txt:"Building your comprehensive report..."},
 ];
 
-let curPred=null, acca=[], stepTmr=null, curStep=0, curPhase=1;
+let curPred=null, acca=[], stepTmr=null, curStep=0, curPhase=1, p0Tmr=null;
 
 // ── HELPERS ──
 const $=id=>document.getElementById(id);
@@ -1148,6 +1148,15 @@ const show=id=>$(id).classList.remove("hidden");
 const hide=id=>$(id).classList.add("hidden");
 const txt=(id,v)=>$(id).textContent=v;
 const html=(id,v)=>$(id).innerHTML=v;
+// Escape text before interpolating it into an innerHTML template. Every render
+// path here builds HTML strings from two untrusted-ish sources: team names the
+// user types, and free-form model prose (reasoning, notes, player names). Neither
+// was escaped, so a name like `<img src=x onerror=...>` executed, and any plain
+// `<` in model text silently swallowed the rest of the markup.
+function esc(v){
+  if(v==null)return"";
+  return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
 function inits(n){const p=(n||"?").split(/[\s\-\.]+/).filter(Boolean);return p.length===1?p[0].slice(0,3).toUpperCase():p.map(w=>w[0]).join("").slice(0,3).toUpperCase()}
 function cconf(v){return v>=70?"#c9a84c":v>=55?"#ffb830":"#ff4d6a"}
 function confBar(v,c="var(--em)"){return`<div class="conf-wrap"><div class="conf-track"><div class="conf-fill" style="width:${Math.min(v,100)}%;background:${c}"></div></div><span class="conf-pct">${v}%</span></div>`}
@@ -1249,7 +1258,13 @@ function showPage(p){
 // XOF and XAF are both CFA Francs pegged to EUR at a FIXED, treaty-defined rate
 // (1 EUR = 655.957 CFA) that never floats — unlike MAD/USD/GBP this rate is
 // exact and permanent, so the static fallback is just as reliable as a live fetch.
-const DEFAULT_RATES_TO_EUR = { MAD: 0.093, USD: 0.92, GBP: 1.17, EUR: 1, XOF: 1/655.957, XAF: 1/655.957 };
+// NOTE: every currency the 1xBet importer can DETECT (CURRENCY_UNITS in
+// parse1xBetHTML) must have an entry here, otherwise the conversion falls back
+// to `||1` and books the stake as if it were EUR. KES/NGN/GHS were detectable
+// but unrated, so an imported 10,000 NGN stake was recorded as €10,000 instead
+// of roughly €6 — corrupting ROI, P&L and the growth chart by ~1600x.
+const DEFAULT_RATES_TO_EUR = { MAD: 0.093, USD: 0.92, GBP: 1.17, EUR: 1, XOF: 1/655.957, XAF: 1/655.957,
+  KES: 0.0066, NGN: 0.00060, GHS: 0.077 };
 const LS_RATES_CACHE = "fiq_rates_cache"; // { rates:{MAD:0.093,...}, fetchedAt: ISOString }
 const RATES_CACHE_TTL = 24*60*60*1000; // refetch once per day — rates don't move enough intra-day to matter for this use case
 
@@ -1283,7 +1298,10 @@ async function fetchLiveExchangeRates(){
     // DEFAULT_RATES_TO_EUR is already exact. Live-fetching them daily would
     // waste 2 of 5 API calls for zero benefit and risk a "live" value that's
     // marginally LESS precise than the exact mathematical constant.
-    const CURRENCIES=["MAD","USD","GBP"]; // extend this list only with currencies that actually float
+    // Extend this list only with currencies that actually float. KES/NGN/GHS
+    // are included because the importer can detect them AND they drift fast
+    // enough (NGN especially) that a static default would go badly stale.
+    const CURRENCIES=["MAD","USD","GBP","KES","NGN","GHS"];
     const results={};
     for(const cur of CURRENCIES){
       try{
@@ -1333,9 +1351,14 @@ function renderRatesFetchStatus(){
 async function refreshRatesNow(){
   const el=$("rates-fetch-status");
   if(el)el.textContent="Fetching live rates...";
-  // Force a refetch by clearing the cache timestamp check
+  // Force a refetch by clearing the cache timestamp check — but keep a copy so
+  // a FAILED refresh doesn't destroy yesterday's good live rates and silently
+  // drop the app back to the static defaults. Only a successful fetch should
+  // replace what's already cached.
+  const _prevCache=getLS(LS_RATES_CACHE,null);
   setLS(LS_RATES_CACHE,null);
   const rates=await fetchLiveExchangeRates();
+  if(!rates&&_prevCache)setLS(LS_RATES_CACHE,_prevCache); // restore on failure
   if(rates){
     $("rate-mad").value=rates.MAD;
     $("rate-usd").value=rates.USD;
@@ -1573,6 +1596,7 @@ function matchToTeam(oddsGames,t1,t2){
 // ─────────────────────────────────────────────────────────
 function resetPredict(){
   curPred=null;clearInterval(stepTmr);
+  if(p0Tmr){clearInterval(p0Tmr);p0Tmr=null}
   hide("loading-section");hide("error-section");hide("results-section");
   show("form-section");$("t1").value="";$("t2").value="";
   window.scrollTo({top:0,behavior:"smooth"});
@@ -2048,7 +2072,9 @@ async function doAnalyze(forceRefresh=false){
       _preTier >= 2 ? fetchTeamStats(t1, t2, comp) : Promise.resolve(null), // Tier 2/3 only
     ]);
 
-    // Done with Phase 0
+    // Done with Phase 0 — stop its step animation immediately so it can't
+    // keep overwriting Phase 1's step list / progress bar (see advanceSteps).
+    if(p0Tmr){clearInterval(p0Tmr);p0Tmr=null}
     renderSteps(STEPS_P0.length, 0);
     const xg1 = xg1res.status==="fulfilled" ? xg1res.value : null;
     const xg2 = xg2res.status==="fulfilled" ? xg2res.value : null;
@@ -2227,6 +2253,7 @@ async function doAnalyze(forceRefresh=false){
 
   }catch(e){
     clearInterval(stepTmr);
+    if(p0Tmr){clearInterval(p0Tmr);p0Tmr=null}
     hide("loading-section");show("form-section");
     const errMsg = e.message==="__TRUNCATED__"
       ? "Response too long even after retry. Please try again."
@@ -2281,8 +2308,16 @@ function advanceSteps(phase){
     $("phase-fill").style.width=pct+"%";
     i=Math.min(i+1,steps.length-1);
   },900);
-  // Phase 0 is fast (~3s), auto-clear after it
-  if(phase===0)setTimeout(()=>clearInterval(t),3500);
+  // Phase 0's fetches usually finish in ~1-2s, well before the old fixed 3.5s
+  // auto-clear fired. That left this interval alive INTO Phase 1, where it kept
+  // repainting Phase 0's step list over Phase 1's and snapping phase-fill back
+  // to <=20% — the user saw "PHASE 1" above Phase 0's steps with the bar moving
+  // backwards. Track the handle so doAnalyze can clear it the moment Phase 0
+  // actually completes; keep the timeout purely as a safety net.
+  if(phase===0){
+    p0Tmr=t;
+    setTimeout(()=>{if(p0Tmr===t){clearInterval(t);p0Tmr=null}},3500);
+  }
 }
 
 function startStepTimer(phase){
@@ -3253,10 +3288,10 @@ function renderResults(p,fromCache){
   // p is the cached/curPred object; writing back into it caused repeated
   // toFixed(1) rounding to compound on every re-render of the same cached
   // result, introducing tiny cumulative float drift over time.
-  html("prob-leg",`<span style="color:var(--gold);font-weight:700">${p.team1} ${wp1}%</span><span style="color:var(--t2);font-weight:600">Draw ${wpD}%</span><span style="color:var(--sap);font-weight:700">${p.team2} ${wp2}%</span>`);
+  html("prob-leg",`<span style="color:var(--gold);font-weight:700">${esc(p.team1)} ${wp1}%</span><span style="color:var(--t2);font-weight:600">Draw ${wpD}%</span><span style="color:var(--sap);font-weight:700">${esc(p.team2)} ${wp2}%</span>`);
 
   {const mp=p.mainPrediction||{market:'1X2',pick:'—',odds:'—',confidence:0,value:false};
-    html("top-pred",`<div><div class="tp-lbl">TOP PREDICTION</div><div class="tp-pick">${mp.market}: ${mp.pick}</div></div><div><div class="tp-odds">${mp.odds}</div><div class="tp-conf">${mp.confidence}% confidence${mp.value?`<span class="vtag">value</span>`:""}</div></div>`);
+    html("top-pred",`<div><div class="tp-lbl">TOP PREDICTION</div><div class="tp-pick">${esc(mp.market)}: ${esc(mp.pick)}</div></div><div><div class="tp-odds">${mp.odds}</div><div class="tp-conf">${mp.confidence}% confidence${mp.value?`<span class="vtag">value</span>`:""}</div></div>`);
   }
   const _cacheAge=curPred?._cachedAt?Math.round((Date.now()-curPred._cachedAt)/60000):0;
   const _cacheLabel=_cacheAge>0?`<span class="cache-tag"><i class="ti ti-clock" style="font-size:10px"></i> Cached ${_cacheAge<60?_cacheAge+"m ago":Math.round(_cacheAge/60)+"h ago"}</span>`:"";
@@ -3342,23 +3377,23 @@ function buildAllTabs(p,c1,c2){
     </div>`;
   }
   if(p.keyFactors?.length){
-    ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-list-check"></i> Key factors</div><div class="factors">${(p.keyFactors||[]).map((f,i)=>`<div class="factor"><span class="fnum">${i+1}</span><p>${f}</p></div>`).join("")}</div></div>`;
+    ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-list-check"></i> Key factors</div><div class="factors">${(p.keyFactors||[]).map((f,i)=>`<div class="factor"><span class="fnum">${i+1}</span><p>${esc(f)}</p></div>`).join("")}</div></div>`;
   }
   const _allVB=[...(p.valueBets||[]).filter(Boolean),...(p.additionalMarkets||[]).filter(m=>m&&m.value)];
   if(_allVB.length){
     ov+=`<div class="mb16"><div class="sec-ttl"><i class="ti ti-diamond"></i> Value bets</div>${_allVB.map((vb,idx)=>`
-      <div class="vbet"><div class="vbet-hdr"><div><div class="vbet-mkt">${vb.market}</div><div class="vbet-pick">${vb.pick}</div></div>
+      <div class="vbet"><div class="vbet-hdr"><div><div class="vbet-mkt">${esc(vb.market)}</div><div class="vbet-pick">${esc(vb.pick)}</div></div>
         <div class="odds-row"><div class="odds-col"><div class="lbl">Market</div><div class="val" style="color:${GREEN}">${vb.odds}</div></div>
         ${vb.trueOdds?`<div class="odds-col odds-div"><div class="lbl">Fair</div><div class="val">${vb.trueOdds}</div></div>`:""}
         </div></div>
         ${vb.edge?`<div class="edge-tag"><i class="ti ti-trending-up" style="font-size:11px"></i> +${vb.edge}% edge</div>`:""}
-        <div class="vbet-rsn">${vb.reasoning||""}</div>
+        <div class="vbet-rsn">${esc(vb.reasoning||"")}</div>
         <button class="btn-sm" style="margin-top:9px;font-size:10px;padding:4px 10px" onclick="quickSaveVB(${idx})"><i class="ti ti-bookmark"></i> Track this bet</button>
       </div>`).join("")}</div>`;
   }
   if(p.injuries?.length){
     ov+=`<div><div class="sec-ttl"><i class="ti ti-first-aid-kit"></i> Injuries & doubts</div><div class="inj-grid">${(p.injuries||[]).map(inj=>`
-      <div class="inj-card"><div class="inj-row"><span class="inj-name">${inj.player}</span><span class="${inj.status==="Out"?"s-out":"s-doubt"}">${inj.status}</span></div><div class="inj-meta">${inj.team} · Impact: ${inj.impact}</div></div>`).join("")}</div></div>`;
+      <div class="inj-card"><div class="inj-row"><span class="inj-name">${esc(inj.player)}</span><span class="${inj.status==="Out"?"s-out":"s-doubt"}">${inj.status}</span></div><div class="inj-meta">${inj.team} · Impact: ${inj.impact}</div></div>`).join("")}</div></div>`;
   }
   html("tc-overview",ov||`<p style="color:var(--t2);font-size:13px">No additional details available.</p>`);
 
@@ -3371,20 +3406,20 @@ function buildAllTabs(p,c1,c2){
     const cc=cconf(m.confidence);
     return`<div class="mkt-card${m.value?" val":""}">
       ${m.value?`<span class="mkt-vtag">VALUE</span>`:""}
-      <div class="mkt-name">${(m.market||"").toUpperCase()}</div>
-      <div class="mkt-row"><span class="mkt-pick">${m.pick}</span><span class="mkt-odds">${m.odds}</span></div>
+      <div class="mkt-name">${esc((m.market||"").toUpperCase())}</div>
+      <div class="mkt-row"><span class="mkt-pick">${esc(m.pick)}</span><span class="mkt-odds">${m.odds}</span></div>
       ${confBar(m.confidence,cc)}
-      ${m.reasoning?`<div class="mkt-rsn">${m.reasoning}</div>`:""}
+      ${m.reasoning?`<div class="mkt-rsn">${esc(m.reasoning)}</div>`:""}
       <button class="btn-sm" style="margin-top:9px;font-size:10px;padding:4px 10px" onclick="quickSaveMarket('predictions',${idx})"><i class="ti ti-bookmark"></i> Track this bet</button></div>`;
   }).join("");
   const addl=(p.additionalMarkets||[]).filter(Boolean).map((m,idx)=>{
     const cc=cconf(m.confidence);
     return`<div class="mkt-card${m.value?" val":""}">
       ${m.value?`<span class="mkt-vtag">VALUE</span>`:""}
-      <div class="mkt-name">${(m.market||"").toUpperCase()}</div>
-      <div class="mkt-row"><span class="mkt-pick">${m.pick}</span><span class="mkt-odds">${m.odds}</span></div>
+      <div class="mkt-name">${esc((m.market||"").toUpperCase())}</div>
+      <div class="mkt-row"><span class="mkt-pick">${esc(m.pick)}</span><span class="mkt-odds">${m.odds}</span></div>
       ${confBar(m.confidence,cc)}
-      ${m.reasoning?`<div class="mkt-rsn">${m.reasoning}</div>`:""}
+      ${m.reasoning?`<div class="mkt-rsn">${esc(m.reasoning)}</div>`:""}
       <button class="btn-sm" style="margin-top:9px;font-size:10px;padding:4px 10px" onclick="quickSaveMarket('additionalMarkets',${idx})"><i class="ti ti-bookmark"></i> Track this bet</button></div>`;
   }).join("");
   return`<div class="mkt-grid">${mainMkts}</div>${addl?`
@@ -3417,7 +3452,7 @@ function buildAllTabs(p,c1,c2){
     const gc=g.team===p.team1?c1:c2;
     return`<div class="sc-card">
       <div class="sc-icon" style="background:${gc}18;color:${gc}"><i class="ti ti-run"></i></div>
-      <div style="flex:1"><div class="sc-name">${g.player}</div><div class="sc-meta">${g.team} · ${g.role}</div>${confBarNoLabel(g.probability,gc)}</div>
+      <div style="flex:1"><div class="sc-name">${esc(g.player)}</div><div class="sc-meta">${esc(g.team)} · ${esc(g.role)}</div>${confBarNoLabel(g.probability,gc)}</div>
       <div class="sc-right"><div class="sc-odds" style="color:${gc};background:${gc}18">${g.odds}</div><div class="sc-prob">${g.probability}% likely</div></div>
       <button class="btn-sm" style="margin-left:6px;padding:4px 7px;align-self:center" title="Track this bet" onclick="quickSaveMarket('goalscorers',${i})"><i class="ti ti-bookmark"></i></button>
     </div>`;
@@ -3445,12 +3480,12 @@ function buildAllTabs(p,c1,c2){
     const h=p.headToHead;
     fm+=`<div class="card"><div class="sec-ttl"><i class="ti ti-arrows-exchange"></i> Head-to-head (${h.totalMeetings||"all"} meetings)</div>
       <div class="h2h-grid">
-        <div class="h2h-stat"><div class="h2h-num" style="color:var(--gold)">${h.team1Wins}</div><div class="h2h-lbl">${p.team1} wins</div></div>
+        <div class="h2h-stat"><div class="h2h-num" style="color:var(--gold)">${h.team1Wins}</div><div class="h2h-lbl">${esc(p.team1)} wins</div></div>
         <div class="h2h-stat"><div class="h2h-num" style="color:var(--t2)">${h.draws}</div><div class="h2h-lbl">Draws</div></div>
-        <div class="h2h-stat"><div class="h2h-num" style="color:var(--sap)">${h.team2Wins}</div><div class="h2h-lbl">${p.team2} wins</div></div>
+        <div class="h2h-stat"><div class="h2h-num" style="color:var(--sap)">${h.team2Wins}</div><div class="h2h-lbl">${esc(p.team2)} wins</div></div>
       </div>
       <div class="h2h-row"><span class="h2h-key">Avg goals per game</span><span class="h2h-val">${h.avgGoals}</span></div>
-      <div class="h2h-row"><span class="h2h-key">Last meeting</span><span class="h2h-val">${h.lastMeeting}</span></div>
+      <div class="h2h-row"><span class="h2h-key">Last meeting</span><span class="h2h-val">${esc(h.lastMeeting)}</span></div>
     </div>`;
   }
   html("tc-form",fm);
@@ -3478,11 +3513,11 @@ function buildIntelTab(p,c1,c2){
       if(!coach||!coach.name)return`<div><div class="lineup-team" style="color:${color}">${teamName}</div><div style="font-size:12px;color:var(--t3);padding:8px 0">No manager intel found</div></div>`;
       return`<div>
         <div class="lineup-team" style="color:${color}">${teamName}</div>
-        <div style="font-size:14px;font-weight:700;margin-bottom:6px">${coach.name}</div>
-        <div class="ref-stat"><span class="ref-k">Style</span><span class="ref-v">${coach.tacticalStyle||"—"}</span></div>
+        <div style="font-size:14px;font-weight:700;margin-bottom:6px">${esc(coach.name)}</div>
+        <div class="ref-stat"><span class="ref-k">Style</span><span class="ref-v">${esc(coach.tacticalStyle||"—")}</span></div>
         <div class="ref-stat"><span class="ref-k">Formation</span><span class="ref-v">${coach.formation||"—"}</span></div>
-        <div class="ref-stat"><span class="ref-k">Tenure</span><span class="ref-v">${coach.tenure||"—"}</span></div>
-        <div class="ref-stat"><span class="ref-k">Experience</span><span class="ref-v">${coach.experienceLevel||"—"}</span></div>
+        <div class="ref-stat"><span class="ref-k">Tenure</span><span class="ref-v">${esc(coach.tenure||"—")}</span></div>
+        <div class="ref-stat"><span class="ref-k">Experience</span><span class="ref-v">${esc(coach.experienceLevel||"—")}</span></div>
         ${coach.pressureStatus?`<div style="font-size:11px;color:var(--amr);margin-top:8px">${coach.pressureStatus}</div>`:""}
         ${coach.playerSentiment&&!/no reporting/i.test(coach.playerSentiment)?`<div style="font-size:11px;color:var(--t2);margin-top:4px;font-style:italic">${coach.playerSentiment}</div>`:""}
       </div>`;
@@ -3506,7 +3541,7 @@ function buildIntelTab(p,c1,c2){
       h+=`<div class="card"><div class="sec-ttl"><i class="ti ti-alert-triangle"></i> Key Player Notes</div>`;
       if(susp.length){
         h+=`<div style="font-size:11px;font-weight:700;color:var(--t3);letter-spacing:.3px;margin-bottom:4px">SUSPENSION RISK</div>`;
-        susp.forEach(s=>{h+=`<div style="font-size:12px;margin-bottom:6px"><b>${s.player}</b> (${s.team}) — ${s.note}</div>`});
+        susp.forEach(s=>{h+=`<div style="font-size:12px;margin-bottom:6px"><b>${esc(s.player)}</b> (${esc(s.team)}) — ${esc(s.note)}</div>`});
       }
       if(hasSPT){
         h+=`<div style="font-size:11px;font-weight:700;color:var(--t3);letter-spacing:.3px;margin:${susp.length?"10px":"0"} 0 4px">SET-PIECE TAKERS</div>
@@ -3535,7 +3570,7 @@ function buildIntelTab(p,c1,c2){
   if(intel.referee){
     const r=intel.referee;
     h+=`<div class="intel-card"><div class="intel-card-title"><i class="ti ti-whistle"></i> REFEREE</div>
-      <div style="font-size:14px;font-weight:600;margin-bottom:8px">${r.name||"Unknown"} <span style="font-size:11px;color:var(--t2);font-weight:400">${r.nationality||""}</span></div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px">${esc(r.name||"Unknown")} <span style="font-size:11px;color:var(--t2);font-weight:400">${r.nationality||""}</span></div>
       <div class="ref-stat"><span class="ref-k">Cards/game</span><span class="ref-v">${r.avgCardsPerGame||"—"}</span></div>
       <div class="ref-stat"><span class="ref-k">Yellows/game</span><span class="ref-v">${r.avgYellowPerGame||"—"}</span></div>
       <div class="ref-stat"><span class="ref-k">Penalty rate</span><span class="ref-v">${r.penaltyRate||"—"}</span></div>
@@ -3587,10 +3622,10 @@ function buildCCTab(p,c1,c2){
       const cc=cconf(m.confidence);
       return`<div class="mkt-card${m.value?" val":""}">
         ${m.value?`<span class="mkt-vtag">VALUE</span>`:""}
-        <div class="mkt-name">${(m.market||"").toUpperCase()}</div>
-        <div class="mkt-row"><span class="mkt-pick">${m.pick}</span><span class="mkt-odds">${m.odds}</span></div>
+        <div class="mkt-name">${esc((m.market||"").toUpperCase())}</div>
+        <div class="mkt-row"><span class="mkt-pick">${esc(m.pick)}</span><span class="mkt-odds">${m.odds}</span></div>
         ${confBar(m.confidence,cc)}
-        ${m.reasoning?`<div class="mkt-rsn">${m.reasoning}</div>`:""}
+        ${m.reasoning?`<div class="mkt-rsn">${esc(m.reasoning)}</div>`:""}
         <button class="btn-sm" style="margin-top:9px;font-size:10px;padding:4px 10px" onclick="quickSaveMarket('cornerMarkets',${i})"><i class="ti ti-bookmark"></i> Track this bet</button>
       </div>`;
     }).join("")}</div></div>`;
@@ -3602,10 +3637,10 @@ function buildCCTab(p,c1,c2){
       const cc=cconf(m.confidence);
       return`<div class="mkt-card${m.value?" val":""}">
         ${m.value?`<span class="mkt-vtag">VALUE</span>`:""}
-        <div class="mkt-name">${(m.market||"").toUpperCase()}</div>
-        <div class="mkt-row"><span class="mkt-pick">${m.pick}</span><span class="mkt-odds">${m.odds}</span></div>
+        <div class="mkt-name">${esc((m.market||"").toUpperCase())}</div>
+        <div class="mkt-row"><span class="mkt-pick">${esc(m.pick)}</span><span class="mkt-odds">${m.odds}</span></div>
         ${confBar(m.confidence,cc)}
-        ${m.reasoning?`<div class="mkt-rsn">${m.reasoning}</div>`:""}
+        ${m.reasoning?`<div class="mkt-rsn">${esc(m.reasoning)}</div>`:""}
         <button class="btn-sm" style="margin-top:9px;font-size:10px;padding:4px 10px" onclick="quickSaveMarket('cardMarkets',${i})"><i class="ti ti-bookmark"></i> Track this bet</button>
       </div>`;
     }).join("")}</div></div>`;
@@ -3616,7 +3651,7 @@ function buildCCTab(p,c1,c2){
     const sorted=[...p.htftMarkets].sort((a,b)=>b.probability-a.probability);
     h+=`<div class="cc-section"><div class="sec-ttl"><i class="ti ti-clock"></i> Half-Time / Full-Time</div><div class="htft-grid">${sorted.map((m,i)=>`
       <div class="htft-card${i===0?" top":""}">
-        <div class="htft-pick">${m.pick}</div>
+        <div class="htft-pick">${esc(m.pick)}</div>
         <div class="htft-odds">${m.odds}</div>
         <div class="htft-prob">${m.probability}% likely</div>
         ${m.reasoning?`<div style="font-size:10px;color:var(--t2);margin-top:4px">${m.reasoning}</div>`:""}
@@ -3825,7 +3860,7 @@ function renderFixtures(d){
   if(!f.length){html("fix-results",`<div class="card"><div class="empty"><i class="ti ti-calendar-x"></i><p>No fixtures found. Try a different competition or date.</p></div></div>`);return}
   html("fix-results",`<div class="card"><div class="sec-ttl" style="margin-bottom:10px"><i class="ti ti-calendar-event"></i> ${f.length} fixture${f.length!==1?"s":""} found</div><div class="fix-list">${f.map(x=>`
     <div class="fix-item">
-      <div class="fix-teams"><div class="fix-match">${x.home} vs ${x.away}</div><div class="fix-time">${[x.time,x.venue,x.round].filter(Boolean).join(" · ")}</div></div>
+      <div class="fix-teams"><div class="fix-match">${esc(x.home)} vs ${esc(x.away)}</div><div class="fix-time">${esc([x.time,x.venue,x.round].filter(Boolean).join(" · "))}</div></div>
       <button class="fix-go" onclick="analyzeFromFixture('${(x.home||"").replace(/'/g,"\\'")}','${(x.away||"").replace(/'/g,"\\'")}')"><i class="ti ti-brain"></i> Analyze</button>
     </div>`).join("")}</div></div>`);
 }
@@ -3841,19 +3876,26 @@ function renderAccaPage(){
   html("acca-legs",acca.map((l,i)=>`
     <div class="acca-leg">
       <div class="acca-leg-n">${i+1}</div>
-      <div class="acca-leg-info"><div class="acca-leg-match">${l.team1} vs ${l.team2}</div><div class="acca-leg-pick">${l.pick}</div><div class="acca-leg-comp">${l.competition}</div></div>
+      <div class="acca-leg-info"><div class="acca-leg-match">${esc(l.team1)} vs ${esc(l.team2)}</div><div class="acca-leg-pick">${esc(l.pick)}</div><div class="acca-leg-comp">${esc(l.competition)}</div></div>
       <div class="acca-leg-odds">${l.odds}</div>
       <button class="acca-rm" onclick="removeAccaLeg('${l.id}')"><i class="ti ti-x"></i></button>
     </div>`).join(""));
   const combo=acca.reduce((a,l)=>a*l.odds,1);
-  const combConf=Math.round(acca.reduce((a,l)=>a*(l.confidence/100),1)*100);
+  // A leg whose confidence the model omitted made this whole product NaN,
+  // rendering "NaN%" and width:NaN%. Skip unrated legs instead of poisoning
+  // the product, and flag when the figure is therefore partial.
+  const _rated=acca.filter(l=>typeof l.confidence==="number"&&isFinite(l.confidence));
+  const combConf=_rated.length
+    ? Math.round(_rated.reduce((a,l)=>a*(l.confidence/100),1)*100)
+    : null;
+  const _confPartial=_rated.length&&_rated.length<acca.length;
   html("acca-sum",`
     <div class="acca-sum-row"><span class="a-lbl">Legs</span><span class="a-val">${acca.length}</span></div>
     <div class="acca-sum-row"><span class="a-lbl">Combined odds</span><span class="a-big">${combo.toFixed(2)}</span></div>
-    <div class="acca-sum-row"><span class="a-lbl">Combined confidence</span>
+    <div class="acca-sum-row"><span class="a-lbl">Combined confidence${_confPartial?` <span style="font-size:10px;color:var(--t3)">(${_rated.length}/${acca.length} legs rated)</span>`:""}</span>
       <div style="display:flex;align-items:center;gap:8px;min-width:120px">
-        <div class="conf-track" style="flex:1"><div class="conf-fill" style="width:${combConf}%;background:${combConf>=70?"#c9a84c":combConf>=55?"#ffb830":"#ff4d6a"}"></div></div>
-        <span style="font-size:14px;font-weight:700">${combConf}%</span>
+        <div class="conf-track" style="flex:1"><div class="conf-fill" style="width:${combConf??0}%;background:${combConf>=70?"#c9a84c":combConf>=55?"#ffb830":"#ff4d6a"}"></div></div>
+        <span style="font-size:14px;font-weight:700">${combConf!=null?combConf+"%":"—"}</span>
       </div>
     </div>`);
   $("cur-sym").textContent=getCurrency();calcReturns();
@@ -3866,14 +3908,16 @@ async function analyzeAcca(){
   if(acca.length<2){toast("Add at least 2 legs");return}
   $("acca-analyze-btn").disabled=true;$("acca-analyze-btn").innerHTML=`<i class="ti ti-loader-2"></i> Analyzing...`;
   const combo=acca.reduce((a,l)=>a*l.odds,1).toFixed(2);
-  const esc=s=>(s||"").replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+  // JSON-string escaping for the prompt below — deliberately NOT the global
+  // esc() HTML escaper. Renamed so it no longer shadows it.
+  const jesc=s=>(s||"").replace(/\\/g,'\\\\').replace(/"/g,'\\"');
   const legsTxt=acca.map((l,i)=>`Leg ${i+1}: ${l.team1} vs ${l.team2} (${l.competition}) — ${l.pick} @ ${l.odds}, confidence ${l.confidence}%`).join("\n");
   try{
     const raw=await callAI(`Expert sports betting analyst. Evaluate this ${acca.length}-leg accumulator:
 ${legsTxt}
 Combined odds: ${combo}
 Return ONLY valid JSON:
-{"combinedOdds":${combo},"combinedConfidence":35,"riskLevel":"High","weakestLeg":"Leg N — reason","strongestLeg":"Leg N — reason","legAnalysis":[${acca.map((l,i)=>`{"leg":${i+1},"match":"${esc(l.team1)} vs ${esc(l.team2)}","pick":"${esc(l.pick)}","risk":"Medium","note":"analysis"}`).join(",")}],"recommendation":"sentence","alternativeSuggestion":"optional"}`,1200,false);
+{"combinedOdds":${combo},"combinedConfidence":35,"riskLevel":"High","weakestLeg":"Leg N — reason","strongestLeg":"Leg N — reason","legAnalysis":[${acca.map((l,i)=>`{"leg":${i+1},"match":"${jesc(l.team1)} vs ${jesc(l.team2)}","pick":"${jesc(l.pick)}","risk":"Medium","note":"analysis"}`).join(",")}],"recommendation":"sentence","alternativeSuggestion":"optional"}`,1200,false);
     const d=parseJSON(raw);renderAccaAnalysis(d);show("acca-analysis");calcReturns();
   }catch(e){const _m=e.message==="__REFUSED__"?"declined by the model's safety system — try again":e.message;toast("Acca analysis failed: "+_m)}
   finally{$("acca-analyze-btn").disabled=false;$("acca-analyze-btn").innerHTML=`<i class="ti ti-brain"></i> Analyze accumulator`}
@@ -3932,8 +3976,8 @@ function renderHistoryPage(){
     const sc={won:"sw",lost:"sl",pending:"sp"}[h.status]||"sp";
     const sl={won:"Won ✓",lost:"Lost ✗",pending:"Pending"}[h.status]||"Pending";
     return`<div class="hist-item">
-      <div class="hist-hdr"><div><div class="hist-match">${h.team1} vs ${h.team2}</div><div class="hist-comp">${h.competition}</div></div><span class="${sc}">${sl}</span></div>
-      <div class="hist-pick">${h.pick}</div>
+      <div class="hist-hdr"><div><div class="hist-match">${esc(h.team1)} vs ${esc(h.team2)}</div><div class="hist-comp">${esc(h.competition)}</div></div><span class="${sc}">${sl}</span></div>
+      <div class="hist-pick">${esc(h.pick)}</div>
       <div class="hist-foot">
         <span class="h-odds">${h.odds}</span><span class="h-date">${fmtDate(h.addedAt)}</span>
         ${h.confidence?`<span style="font-size:11px;color:var(--t2)">${h.confidence}% conf</span>`:""}
@@ -4061,7 +4105,13 @@ function renderAnalytics(hist){
   // exist (it reflects actual money), otherwise fall back to flat-unit ROI.
   const hasReal = realStakeBets.length>0;
   const headlinePL  = hasReal ? realPL : flatPL;
+  // realROI/flatROI are null when there is nothing settled to divide by. With
+  // history holding ONLY pending bets, renderHistoryPage still gets here (it
+  // only early-returns on a completely empty history), so headlineROI was null
+  // and the card rendered the literal string "+null%" — `null >= 0` is true, so
+  // even the sign test passed. Fall back to a displayable "—" instead.
   const headlineROI = hasReal ? realROI : flatROI;
+  const hasROI      = headlineROI !== null && headlineROI !== undefined;
   const totalUnits  = settled.length;
 
   // Real-stake P&L is ALWAYS in EUR now (converted permanently at import
@@ -4074,7 +4124,7 @@ function renderAnalytics(hist){
 
   html("atc-roi",`<div class="roi-display">
     <div class="stat-card"><div class="stat-val" style="color:${headlinePL>=0?GREEN:RED};font-size:20px">${headlinePL>=0?"+":""}${headlinePL.toFixed(2)}${hasReal?" "+cur:" u"}</div><div class="stat-lbl">${hasReal?"Real P&L":"Units P&L"}</div></div>
-    <div class="stat-card"><div class="stat-val" style="color:${headlineROI>=0?GREEN:RED};font-size:20px">${headlineROI>=0?"+":""}${headlineROI}%</div><div class="stat-lbl">ROI</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:${!hasROI?"var(--t3)":headlineROI>=0?GREEN:RED};font-size:20px">${hasROI?`${headlineROI>=0?"+":""}${headlineROI}%`:"—"}</div><div class="stat-lbl">ROI</div></div>
     <div class="stat-card"><div class="stat-val" style="font-size:20px">${totalUnits}</div><div class="stat-lbl">Settled bets</div></div>
   </div>
   ${hasReal&&flatTotal>0?`<div style="display:flex;gap:10px;margin-top:10px;font-size:11px;color:var(--t2)">
@@ -4426,7 +4476,15 @@ function parse1xBetHTML(html){
       const dp = dateStr.replace(" | "," ");
       const [dd,mm,yyyy] = dp.substring(0,10).split(".");
       const time = dp.substring(11) || "00:00";
-      const isoDate = `${yyyy}-${mm}-${dd}T${time}:00.000Z`;
+      // 1xBet exports the bet time in the ACCOUNT's local timezone. Appending
+      // "Z" declared it as UTC, so every imported bet was shifted by the local
+      // offset — enough to land it on the previous/next calendar day in the
+      // history list and the growth chart's chronological sort. Build it as a
+      // local Date and let toISOString() apply the correct offset.
+      const _local = new Date(+yyyy, (+mm)-1, +dd, +(time.split(":")[0]||0), +(time.split(":")[1]||0));
+      const isoDate = isNaN(_local.getTime())
+        ? `${yyyy}-${mm}-${dd}T${time}:00.000Z` // malformed date — fall back rather than drop the bet
+        : _local.toISOString();
 
       if(!betId||!market)return;
       // Void/refunded bets (e.g. "100% refund" for abandoned/postponed matches)
@@ -4442,6 +4500,11 @@ function parse1xBetHTML(html){
       // We estimate confidence as implied probability + a conservative
       // 8-10% edge (the minimum FootballIQ requires to flag value),
       // capped at a realistic ceiling.
+      // Resolve the EUR rate once. EUR itself is 1; a detected-but-unrated
+      // currency yields null so the conversion below is skipped entirely.
+      const _fxRate = stakeCurrency ? (EXCHANGE_RATES[stakeCurrency] ?? null) : null;
+      if(stakeCurrency && _fxRate==null) console.warn(`1xBet import: no EUR rate for ${stakeCurrency} — bet recorded without EUR conversion.`);
+
       let estConf = null;
       if(odds){
         const impliedProb = Math.round(1/odds*100);
@@ -4462,8 +4525,12 @@ function parse1xBetHTML(html){
         // This is the permanent, stable value used for all P&L/ROI/growth-chart math —
         // it does NOT get recalculated later even if exchange rates in Settings change,
         // so historical P&L stays consistent regardless of future currency switches.
-        stakeEUR:  stake!=null  ? +(stake  * (EXCHANGE_RATES[stakeCurrency]||1)).toFixed(2) : null,
-        payoutEUR: payout!=null ? +(payout * (EXCHANGE_RATES[stakeCurrency]||1)).toFixed(2) : null,
+        // If we somehow detect a currency we have no rate for, record NO EUR
+        // value rather than silently applying a 1:1 rate — a wrong number here
+        // corrupts ROI/P&L invisibly, whereas a null makes the bet fall into
+        // the clearly-labelled flat-unit bucket instead.
+        stakeEUR:  (stake!=null  && _fxRate!=null) ? +(stake  * _fxRate).toFixed(2) : null,
+        payoutEUR: (payout!=null && _fxRate!=null) ? +(payout * _fxRate).toFixed(2) : null,
         confidence:  estConf,
         status:      status==="win" ? "won" : "lost",
         settledBy:   "1xbet-import",
@@ -4531,14 +4598,11 @@ async function import1xBet(input){
 // Service worker registration
 if("serviceWorker" in navigator){
   navigator.serviceWorker.register("/service-worker.js")
-    .then(reg => {
-      console.log("FootballIQ SW registered:", reg.scope);
-      swReg = reg;
-    })
+    .then(reg => console.log("FootballIQ SW registered:", reg.scope))
     .catch(err => console.warn("SW registration failed:", err.message));
 }
-
-let swReg = null;
+// (The former module-level `swReg` was write-only — assigned here and never
+// read. Alert polling resolves the registration via navigator.serviceWorker.ready.)
 
 // Alert shortlist stored in localStorage
 const LS_ALERT = "fiq-alert-shortlist";
